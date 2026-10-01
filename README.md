@@ -1,99 +1,108 @@
-# Decky Plugin Template [![Chat](https://img.shields.io/badge/chat-on%20discord-7289da.svg)](https://deckbrew.xyz/discord)
+# Decky Audiobookshelf
 
-Reference example for using [decky-frontend-lib](https://github.com/SteamDeckHomebrew/decky-frontend-lib) (@decky/ui) in a [decky-loader](https://github.com/SteamDeckHomebrew/decky-loader) plugin.
+A controller-native Audiobookshelf client for the Steam Deck Quick Access Menu.
 
-### **Please also refer to the [wiki](https://wiki.deckbrew.xyz/en/user-guide/home#plugin-development) for important information on plugin development and submissions/updates. currently documentation is split between this README and the wiki which is something we are hoping to rectify in the future.**  
+This repository is an early v0.1 proof of concept. It can authenticate with current Audiobookshelf JWT/refresh-token APIs, load book libraries and Continue Listening, browse/search, start an Audiobookshelf playback session, control a background `mpv` process, show chapter metadata, change speed, and periodically synchronize progress.
 
-## Developers
+## Current vertical slice
 
-### Dependencies
+- Sign in with server URL, username, and password.
+- Store the short-lived access token and rotating refresh token in Decky's per-plugin settings directory with mode `0600`.
+- Refresh an expired access token and persist the rotated pair.
+- Browse book libraries, Continue Listening, and search results.
+- Start/resume the server's official playback session.
+- Play direct or transcoded session tracks in an out-of-CEF `mpv` process.
+- Play/pause, ±30 seconds, previous/next chapter, and 0.5–3× speed.
+- Sync current time and listened time every 15 seconds and close the session on stop/unload.
+- Render all actions with Decky/Steam focusable controls.
 
-This template relies on the user having Node.js v16.14+ and `pnpm` (v9) installed on their system.  
-Please make sure to install pnpm v9 to prevent issues with CI during plugin submission.  
-`pnpm` can be downloaded from `npm` itself which is recommended.
+The proof of concept has not yet been exercised on physical Steam Deck hardware. In particular, simultaneous game + audiobook mixing and suspend/resume recovery are acceptance tests, not completed claims. See [the POC checklist](docs/POC_CHECKLIST.md).
 
-#### Linux
+## Architecture
+
+```text
+Decky React panel (presentation and controller focus only)
+        │ @decky/api typed RPC
+        ▼
+main.py (thin Decky adapter)
+        │
+        ▼
+py_modules/abs_player_core
+  ├── Audiobookshelf HTTP/JWT client
+  ├── session + progress coordinator
+  └── mpv JSON-IPC controller
+        │
+        ▼
+mpv → PipeWire default sink
+```
+
+The panel can disappear without stopping playback because the player is a separate native process owned by the plugin backend. The plugin deliberately does **not** request Decky's root flag, so its process runs as the Deck user and can connect to the user's PipeWire session.
+
+For v0.1, Python is orchestration rather than the audio engine; decoding, buffering, seeking, time-stretching, and PipeWire output all live in native `mpv`. A Rust sidecar remains a sensible packaging target once the hardware POC is proven, especially for first-class MPRIS and tighter lifecycle management. The reasoning and alternatives are in [research notes](docs/RESEARCH.md).
+
+## Requirements
+
+- Decky Loader using plugin API v1.
+- An Audiobookshelf server with a book library.
+- `mpv` available at `/usr/bin/mpv`, on `PATH`, or bundled as `bin/mpv`.
+- Node.js 16.14+ and pnpm 9 for development, matching the official Decky template guidance.
+
+`mpv` must include a PipeWire or PulseAudio output. The player requests `pipewire,pulse,alsa` in that order.
+
+## Build and test
 
 ```bash
-sudo npm i -g pnpm@9
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm test
+pnpm run typecheck
 ```
 
-If you would like to build plugins that have their own custom backends, Docker is required as it is used by the Decky CLI tool.
+The build script drives the official Decky Rollup configuration through its API and writes `dist/index.js`. The small wrapper exits explicitly to avoid a Node 24/macOS dependency handle that otherwise remains open after Rollup finishes. Python has no third-party runtime dependencies.
 
-### Making your own plugin
+## Install on a development Steam Deck
 
-1. You can fork this repo or utilize the "Use this template" button on Github.
-2. In your local fork/own plugin-repository run these commands:
-   1. ``pnpm i``
-   2. ``pnpm run build``
-   - These setup pnpm and build the frontend code for testing.
-3. Consult the [decky-frontend-lib](https://github.com/SteamDeckHomebrew/decky-frontend-lib) repository for ways to accomplish your tasks.
-   - Documentation and examples are still rough, 
-   - Decky loader primarily targets Steam Deck hardware so keep this in mind when developing your plugin.
-4. If using VSCodium/VSCode, run the `setup` and `build` and `deploy` tasks. If not using VSCodium etc. you can derive your own makefile or just manually utilize the scripts for these commands as you see fit.
+1. Build the frontend.
+2. Copy the repository contents (excluding `.git`, `node_modules`, and tests) to:
 
-If you use VSCode or it's derivatives (we suggest [VSCodium](https://vscodium.com/)!) just run the `setup` and `build` tasks. It's really that simple.
+   ```text
+   /home/deck/homebrew/plugins/decky-audiobookshelf/
+   ```
 
-#### Other important information
+3. If SteamOS does not provide `mpv`, place a compatible executable at `bin/mpv` and make it executable.
+4. Restart the Decky plugin loader:
 
-Everytime you change the frontend code (`index.tsx` etc) you will need to rebuild using the commands from step 2 above or the build task if you're using vscode or a derivative.
+   ```bash
+   sudo systemctl restart plugin_loader
+   ```
 
-Note: If you are receiving build errors due to an out of date library, you should run this command inside of your repository:
+5. Open **… → Decky → Audiobookshelf**, enter the server URL and credentials, and run the POC checklist.
 
-```bash
-pnpm update @decky/ui --latest
+For repeatable releases, the next packaging checkpoint is a Decky-compatible zip with an x86_64 Linux `mpv` artifact and its license notices. Do not redistribute an arbitrary static build without auditing its codec and GPL/LGPL obligations.
+
+## Security notes
+
+- Passwords are used only for `/login` and are not persisted.
+- Tokens remain in Decky's private plugin settings directory and never enter the React UI.
+- TLS verification is on by default. The toggle for self-signed certificates is explicit.
+- The bearer token is sent to `mpv` over a local Unix socket, not exposed in its process arguments.
+- The plugin runs without root privileges.
+
+## Repository layout
+
+```text
+main.py                         Decky RPC adapter
+src/index.tsx                   controller-native Quick Access UI
+py_modules/abs_player_core/     reusable API/player/session core
+tests/                          dependency-free unit tests
+docs/RESEARCH.md                source-backed technical decisions
+docs/POC_CHECKLIST.md           physical Deck acceptance checklist
 ```
 
-### Backend support
+## Known gaps
 
-If you are developing with a backend for a plugin and would like to submit it to the [decky-plugin-database](https://github.com/SteamDeckHomebrew/decky-plugin-database) you will need to have all backend code located in ``backend/src``, with backend being located in the root of your git repository.
-When building your plugin, the source code will be built and any finished binary or binaries will be output to ``backend/out`` (which is created during CI.)
-If your buildscript, makefile or any other build method does not place the binary files in the ``backend/out`` directory they will not be properly picked up during CI and your plugin will not have the required binaries included for distribution.
-
-Example:  
-In our makefile used to demonstrate the CI process of building and distributing a plugin backend, note that the makefile explicitly creates the `out` folder (``backend/out``) and then compiles the binary into that folder. Here's the relevant snippet.
-
-```make
-hello:
-	mkdir -p ./out
-	gcc -o ./out/hello ./src/main.c
-```
-
-The CI does create the `out` folder itself but we recommend creating it yourself if possible during your build process to ensure the build process goes smoothly.
-
-Note: When locally building your plugin it will be placed into a folder called 'out' this is different from the concept described above.
-
-The out folder is not sent to the final plugin, but is then put into a ``bin`` folder which is found at the root of the plugin's directory.  
-More information on the bin folder can be found below in the distribution section below.
-
-### Distribution
-
-We recommend following the instructions found in the [decky-plugin-database](https://github.com/SteamDeckHomebrew/decky-plugin-database) on how to get your plugin up on the plugin store. This is the best way to get your plugin in front of users.
-You can also choose to do distribution via a zip file containing the needed files, if that zip file is uploaded to a URL it can then be downloaded and installed via decky-loader.
-
-Layout of a plugin zip ready for distribution:
-```
-pluginname-v1.0.0.zip (version number is optional but recommended for users sake)
-   |
-   pluginname/ <directory>
-   |  |  |
-   |  |  bin/ <directory> (optional)
-   |  |     |
-   |  |     binary (optional)
-   |  |
-   |  dist/ <directory> [required]
-   |      |
-   |      index.js [required]
-   | 
-   package.json [required]
-   plugin.json [required]
-   main.py {required if you are using the python backend of decky-loader: serverAPI}
-   README.md (optional but recommended)
-   LICENSE(.md) [required, filename should be roughly similar, suffix not needed]
-```
-
-Note regarding licenses: Including a license is required for the plugin store if your chosen license requires the license to be included alongside usage of source-code/binaries!
-
-Standard procedure for licenses is to have your chosen license at the top of the file, and to leave the original license for the plugin-template at the bottom. If this is not the case on submission to the plugin database, you will be asked to fix this discrepancy.
-
-We cannot and will not distribute your plugin on the Plugin Store if it's license requires it's inclusion but you have not included a license to be re-distributed with your plugin in the root of your git repository.
+- No bundled `mpv` binary yet.
+- MPRIS is designed but not implemented.
+- OIDC login, offline downloads, sleep timer, bookmarks, podcasts, queues, and multiple servers are out of v0.1 scope.
+- No reconnect after suspend or mpv crash yet.
+- The first panel keeps browsing deliberately simple; full-page library/detail routes come after the audio POC.

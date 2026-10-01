@@ -1,30 +1,27 @@
 {
-  "name": "decky-plugin-template",
-  "version": "0.0.1",
-  "description": "A template to quickly create decky plugins from scratch, based on TypeScript and webpack",
+  "name": "decky-audiobookshelf",
+  "version": "0.1.0-alpha.1",
+  "description": "Controller-native Audiobookshelf playback for Decky Loader",
   "type": "module",
   "scripts": {
-    "build": "rollup -c",
-    "watch": "rollup -c -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "\"$npm_node_execpath\" ./scripts/build.mjs",
+    "watch": "\"$npm_node_execpath\" ./node_modules/rollup/dist/bin/rollup -c -w",
+    "typecheck": "\"$npm_node_execpath\" ./node_modules/typescript/bin/tsc --noEmit",
+    "test": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SteamDeckHomebrew/decky-plugin-template.git"
+    "url": "https://github.com/your-name/decky-audiobookshelf.git"
   },
   "keywords": [
     "decky",
     "plugin",
-    "plugin-template",
+    "audiobookshelf",
     "steam-deck",
     "deck"
   ],
-  "author": "You <you@you.tld>",
+  "author": "Allen",
   "license": "BSD-3-Clause",
-  "bugs": {
-    "url": "https://github.com/SteamDeckHomebrew/decky-plugin-template/issues"
-  },
-  "homepage": "https://github.com/SteamDeckHomebrew/decky-plugin-template#readme",
   "devDependencies": {
     "@decky/rollup": "^1.0.2",
     "@decky/ui": "^4.11.0",

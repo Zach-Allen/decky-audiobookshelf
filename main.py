@@ -1,57 +1,83 @@
-import os
+"""Decky RPC adapter for the reusable Audiobookshelf playback core."""
 
-# The decky plugin module is located at decky-loader/plugin
-# For easy intellisense checkout the decky-loader code repo
-# and add the `decky-loader/plugin/imports` path to `python.analysis.extraPaths` in `.vscode/settings.json`
+import os
+import sys
+
 import decky
-import asyncio
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "py_modules"))
+
+from abs_player_core.service import AudiobookshelfService  # noqa: E402
+
 
 class Plugin:
-    # A normal method. It can be called from the TypeScript side using @decky/api.
-    async def add(self, left: int, right: int) -> int:
-        return left + right
+    service: AudiobookshelfService
 
-    async def long_running(self):
-        await asyncio.sleep(15)
-        # Passing through a bunch of random data, just as an example
-        await decky.emit("timer_event", "Hello from the backend!", True, 2)
-
-    # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def _main(self):
-        self.loop = asyncio.get_event_loop()
-        decky.logger.info("Hello World!")
+        self.service = AudiobookshelfService(
+            settings_dir=decky.DECKY_PLUGIN_SETTINGS_DIR,
+            runtime_dir=decky.DECKY_PLUGIN_RUNTIME_DIR,
+            plugin_dir=decky.DECKY_PLUGIN_DIR,
+            logger=decky.logger,
+        )
+        await self.service.start()
+        decky.logger.info("Audiobookshelf plugin ready")
 
-    # Function called first during the unload process, utilize this to handle your plugin being stopped, but not
-    # completely removed
     async def _unload(self):
-        decky.logger.info("Goodnight World!")
-        pass
+        # Playback survives panel unmounts. Decky calls this only when the
+        # plugin itself unloads, at which point the server session is closed.
+        await self.service.shutdown()
 
-    # Function called after `_unload` during uninstall, utilize this to clean up processes and other remnants of your
-    # plugin that may remain on the system
     async def _uninstall(self):
-        decky.logger.info("Goodbye World!")
-        pass
+        await self.service.shutdown()
 
-    async def start_timer(self):
-        self.loop.create_task(self.long_running())
+    async def get_state(self):
+        return await self.service.get_state()
 
-    # Migrations that should be performed before entering `_main()`.
-    async def _migration(self):
-        decky.logger.info("Migrating")
-        # Here's a migration example for logs:
-        # - `~/.config/decky-template/template.log` will be migrated to `decky.decky_LOG_DIR/template.log`
-        decky.migrate_logs(os.path.join(decky.DECKY_USER_HOME,
-                                               ".config", "decky-template", "template.log"))
-        # Here's a migration example for settings:
-        # - `~/homebrew/settings/template.json` is migrated to `decky.decky_SETTINGS_DIR/template.json`
-        # - `~/.config/decky-template/` all files and directories under this root are migrated to `decky.decky_SETTINGS_DIR/`
-        decky.migrate_settings(
-            os.path.join(decky.DECKY_HOME, "settings", "template.json"),
-            os.path.join(decky.DECKY_USER_HOME, ".config", "decky-template"))
-        # Here's a migration example for runtime data:
-        # - `~/homebrew/template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
-        # - `~/.local/share/decky-template/` all files and directories under this root are migrated to `decky.decky_RUNTIME_DIR/`
-        decky.migrate_runtime(
-            os.path.join(decky.DECKY_HOME, "template"),
-            os.path.join(decky.DECKY_USER_HOME, ".local", "share", "decky-template"))
+    async def configure(self, server_url: str, username: str, password: str, verify_tls: bool = True):
+        return await self.service.configure(server_url, username, password, verify_tls)
+
+    async def logout(self):
+        return await self.service.logout()
+
+    async def get_libraries(self):
+        return await self.service.get_libraries()
+
+    async def get_continue_listening(self, library_id: str):
+        return await self.service.get_continue_listening(library_id)
+
+    async def browse_library(self, library_id: str, page: int = 0, limit: int = 24):
+        return await self.service.browse_library(library_id, page, limit)
+
+    async def search(self, library_id: str, query: str):
+        return await self.service.search(library_id, query)
+
+    async def get_book(self, item_id: str):
+        return await self.service.get_book(item_id)
+
+    async def get_cover(self, item_id: str):
+        return await self.service.get_cover(item_id)
+
+    async def play_item(self, item_id: str):
+        return await self.service.play_item(item_id)
+
+    async def toggle_play_pause(self):
+        return await self.service.toggle_play_pause()
+
+    async def seek_relative(self, seconds: float):
+        return await self.service.seek_relative(seconds)
+
+    async def previous_chapter(self):
+        return await self.service.previous_chapter()
+
+    async def next_chapter(self):
+        return await self.service.next_chapter()
+
+    async def set_speed(self, speed: float):
+        return await self.service.set_speed(speed)
+
+    async def stop(self):
+        return await self.service.stop()
+
+    async def get_diagnostics(self):
+        return await self.service.get_diagnostics()

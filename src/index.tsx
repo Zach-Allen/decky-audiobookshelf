@@ -1,115 +1,433 @@
 import {
   ButtonItem,
+  DialogButton,
+  Focusable,
   PanelSection,
   PanelSectionRow,
-  Navigation,
-  staticClasses
+  SliderField,
+  TextField,
+  ToggleField,
+  staticClasses,
 } from "@decky/ui";
+import { callable, definePlugin, toaster } from "@decky/api";
+import { useCallback, useEffect, useState } from "react";
 import {
-  addEventListener,
-  removeEventListener,
-  callable,
-  definePlugin,
-  toaster,
-  // routerHook
-} from "@decky/api"
-import { useState } from "react";
-import { FaShip } from "react-icons/fa";
+  FaBookOpen,
+  FaCog,
+  FaPause,
+  FaPlay,
+  FaSearch,
+  FaStepBackward,
+  FaStepForward,
+} from "react-icons/fa";
 
-// import logo from "../assets/logo.png";
+interface Library {
+  id: string;
+  name: string;
+  mediaType: string;
+}
 
-// This function calls the python function "add", which takes in two numbers and returns their sum (as a number)
-// Note the type annotations:
-//  the first one: [first: number, second: number] is for the arguments
-//  the second one: number is for the return value
-const add = callable<[first: number, second: number], number>("add");
+interface Book {
+  id: string;
+  title: string;
+  author: string;
+  duration: number;
+  currentTime: number;
+  progress: number;
+}
 
-// This function calls the python function "start_timer", which takes in no arguments and returns nothing.
-// It starts a (python) timer which eventually emits the event 'timer_event'
-const startTimer = callable<[], void>("start_timer");
+interface Chapter {
+  id?: number;
+  title?: string;
+  start: number;
+  end?: number;
+}
 
-function Content() {
-  const [result, setResult] = useState<number | undefined>();
+interface Playback {
+  available: boolean;
+  isPlaying: boolean;
+  isPaused: boolean;
+  position: number;
+  duration: number;
+  speed: number;
+  session: null | {
+    id: string;
+    libraryItemId: string;
+    title: string;
+    author: string;
+  };
+  chapter: Chapter | null;
+  chapterIndex: number;
+}
 
-  const onClick = async () => {
-    const result = await add(Math.random(), Math.random());
-    setResult(result);
+interface PluginState {
+  configured: boolean;
+  serverUrl: string;
+  username: string;
+  verifyTls: boolean;
+  error: string;
+  playback: Playback;
+}
+
+type View = "home" | "library" | "search" | "settings";
+
+const getState = callable<[], PluginState>("get_state");
+const configure = callable<
+  [serverUrl: string, username: string, password: string, verifyTls: boolean],
+  { success: boolean; libraries: Library[] }
+>("configure");
+const logout = callable<[], { success: boolean }>("logout");
+const getLibraries = callable<[], Library[]>("get_libraries");
+const getContinueListening = callable<[libraryId: string], Book[]>("get_continue_listening");
+const browseLibrary = callable<
+  [libraryId: string, page: number, limit: number],
+  { items: Book[]; total: number; page: number }
+>("browse_library");
+const searchLibrary = callable<[libraryId: string, query: string], Book[]>("search");
+const getCover = callable<[itemId: string], string>("get_cover");
+const playItem = callable<[itemId: string], Playback>("play_item");
+const togglePlayPause = callable<[], Playback>("toggle_play_pause");
+const seekRelative = callable<[seconds: number], Playback>("seek_relative");
+const previousChapter = callable<[], Playback>("previous_chapter");
+const nextChapter = callable<[], Playback>("next_chapter");
+const setSpeed = callable<[speed: number], Playback>("set_speed");
+
+const colors = {
+  surface: "#17191d",
+  raised: "#22252b",
+  accent: "#f59e0b",
+  text: "#f5f5f4",
+  muted: "#a8a29e",
+  error: "#fca5a5",
+};
+
+function formatTime(value: number): string {
+  const seconds = Math.max(0, Math.floor(value || 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0
+    ? `${hours}:${minutes.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`
+    : `${minutes}:${remainder.toString().padStart(2, "0")}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function Setup({ initial, onConnected }: { initial: PluginState; onConnected: () => void }) {
+  const [serverUrl, setServerUrl] = useState(initial.serverUrl || "http://");
+  const [username, setUsername] = useState(initial.username || "");
+  const [password, setPassword] = useState("");
+  const [verifyTls, setVerifyTls] = useState(initial.verifyTls);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(initial.error);
+
+  const connect = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await configure(serverUrl, username, password, verifyTls);
+      onConnected();
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <PanelSection title="Panel Section">
+    <PanelSection title="Connect to Audiobookshelf">
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={onClick}
-        >
-          {result ?? "Add two numbers via Python"}
-        </ButtonItem>
+        <TextField label="Server address" value={serverUrl} mustBeURL onChange={(event) => setServerUrl(event.target.value)} />
       </PanelSectionRow>
       <PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => startTimer()}
-        >
-          {"Start Python timer"}
+        <TextField label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <TextField label="Password" value={password} bIsPassword onChange={(event) => setPassword(event.target.value)} />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Verify HTTPS certificate"
+          description="Disable only for a trusted self-signed server."
+          checked={verifyTls}
+          onChange={setVerifyTls}
+        />
+      </PanelSectionRow>
+      {error && <div style={{ color: colors.error, padding: "8px 0" }}>{error}</div>}
+      <PanelSectionRow>
+        <ButtonItem layout="below" disabled={busy || !serverUrl || !username} onClick={connect}>
+          {busy ? "Connecting…" : "Sign in"}
         </ButtonItem>
       </PanelSectionRow>
-
-      {/* <PanelSectionRow>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <img src={logo} />
-        </div>
-      </PanelSectionRow> */}
-
-      {/*<PanelSectionRow>
-        <ButtonItem
-          layout="below"
-          onClick={() => {
-            Navigation.Navigate("/decky-plugin-test");
-            Navigation.CloseSideMenus();
-          }}
-        >
-          Router
-        </ButtonItem>
-      </PanelSectionRow>*/}
     </PanelSection>
   );
-};
+}
 
-export default definePlugin(() => {
-  console.log("Template plugin initializing, this is called once on frontend startup")
+function Player({ playback, cover, run }: { playback: Playback; cover: string; run: (action: () => Promise<Playback>) => void }) {
+  if (!playback.session) {
+    return (
+      <PanelSection title="Now Playing">
+        <div style={{ color: colors.muted, padding: "10px 0" }}>
+          Pick a book below to start or resume playback.
+        </div>
+      </PanelSection>
+    );
+  }
 
-  // serverApi.routerHook.addRoute("/decky-plugin-test", DeckyPluginRouterTest, {
-  //   exact: true,
-  // });
+  const progress = playback.duration ? Math.min(100, (playback.position / playback.duration) * 100) : 0;
+  return (
+    <PanelSection title="Now Playing">
+      <div style={{ display: "flex", gap: 12, padding: "4px 0 10px" }}>
+        <div
+          style={{
+            width: 84,
+            height: 126,
+            borderRadius: 8,
+            background: colors.raised,
+            flexShrink: 0,
+            overflow: "hidden",
+          }}
+        >
+          {cover && <img src={cover} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+        </div>
+        <div style={{ minWidth: 0, alignSelf: "center" }}>
+          <div style={{ color: colors.text, fontSize: 17, fontWeight: 700 }}>{playback.session.title}</div>
+          <div style={{ color: colors.muted, marginTop: 3 }}>{playback.session.author}</div>
+          <div style={{ color: colors.accent, marginTop: 12, fontWeight: 600 }}>
+            {playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}`}
+          </div>
+        </div>
+      </div>
+      <div style={{ height: 5, background: "#393c43", borderRadius: 99, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${progress}%`, background: colors.accent }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", color: colors.muted, fontVariantNumeric: "tabular-nums", margin: "5px 0 10px" }}>
+        <span>{formatTime(playback.position)}</span>
+        <span>{formatTime(playback.duration)}</span>
+      </div>
+      <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8 }}>
+        <DialogButton onClick={() => run(() => seekRelative(-30))}>◀ 30s</DialogButton>
+        <DialogButton onClick={() => run(togglePlayPause)}>
+          {playback.isPlaying ? <FaPause /> : <FaPlay />}
+        </DialogButton>
+        <DialogButton onClick={() => run(() => seekRelative(30))}>30s ▶</DialogButton>
+      </Focusable>
+      <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <DialogButton onClick={() => run(previousChapter)}><FaStepBackward /> Chapter</DialogButton>
+        <DialogButton onClick={() => run(nextChapter)}>Chapter <FaStepForward /></DialogButton>
+      </Focusable>
+      <PanelSectionRow>
+        <SliderField
+          label="Playback speed"
+          value={playback.speed}
+          min={0.5}
+          max={3}
+          step={0.05}
+          showValue
+          valueSuffix="×"
+          onChange={(value) => run(() => setSpeed(value))}
+        />
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
 
-  // Add an event listener to the "timer_event" event from the backend
-  const listener = addEventListener<[
-    test1: string,
-    test2: boolean,
-    test3: number
-  ]>("timer_event", (test1, test2, test3) => {
-    console.log("Template got timer_event with:", test1, test2, test3)
-    toaster.toast({
-      title: "template got timer_event",
-      body: `${test1}, ${test2}, ${test3}`
-    });
-  });
+function BookList({ title, books, onPlay }: { title: string; books: Book[]; onPlay: (book: Book) => void }) {
+  return (
+    <PanelSection title={title}>
+      {books.length === 0 && <div style={{ color: colors.muted, padding: "8px 0" }}>No books found.</div>}
+      {books.map((book) => (
+        <PanelSectionRow key={book.id}>
+          <ButtonItem
+            layout="below"
+            label={book.title}
+            description={`${book.author || "Unknown author"}${book.currentTime ? ` • ${formatTime(book.currentTime)} listened` : ""}`}
+            onClick={() => onPlay(book)}
+          >
+            Play
+          </ButtonItem>
+        </PanelSectionRow>
+      ))}
+    </PanelSection>
+  );
+}
 
-  return {
-    // The name shown in various decky menus
-    name: "Test Plugin",
-    // The element displayed at the top of your plugin's menu
-    titleView: <div className={staticClasses.Title}>Decky Example Plugin</div>,
-    // The content of your plugin's menu
-    content: <Content />,
-    // The icon displayed in the plugin list
-    icon: <FaShip />,
-    // The function triggered when your plugin unloads
-    onDismount() {
-      console.log("Unloading")
-      removeEventListener("timer_event", listener);
-      // serverApi.routerHook.removeRoute("/decky-plugin-test");
-    },
+function Content() {
+  const [state, setState] = useState<PluginState | null>(null);
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [libraryId, setLibraryId] = useState("");
+  const [books, setBooks] = useState<Book[]>([]);
+  const [view, setView] = useState<View>("home");
+  const [query, setQuery] = useState("");
+  const [cover, setCover] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const refresh = useCallback(async () => {
+    try {
+      setState(await getState());
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!state?.configured) return;
+    getLibraries()
+      .then((result) => {
+        setLibraries(result);
+        if (!libraryId && result[0]) setLibraryId(result[0].id);
+      })
+      .catch((reason) => setError(errorMessage(reason)));
+  }, [state?.configured]);
+
+  useEffect(() => {
+    const itemId = state?.playback.session?.libraryItemId;
+    if (!itemId) {
+      setCover("");
+      return;
+    }
+    getCover(itemId).then(setCover).catch(() => setCover(""));
+  }, [state?.playback.session?.libraryItemId]);
+
+  const loadHome = useCallback(async () => {
+    if (!libraryId) return;
+    setBusy(true);
+    try {
+      setBooks(await getContinueListening(libraryId));
+      setError("");
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  }, [libraryId]);
+
+  useEffect(() => {
+    if (view === "home") loadHome();
+  }, [view, loadHome]);
+
+  const runPlayback = async (action: () => Promise<Playback>) => {
+    try {
+      const playback = await action();
+      setState((current) => current ? { ...current, playback } : current);
+      setError("");
+    } catch (reason) {
+      const message = errorMessage(reason);
+      setError(message);
+      toaster.toast({ title: "Audiobookshelf", body: message });
+    }
   };
-});
+
+  const play = (book: Book) => runPlayback(() => playItem(book.id));
+
+  const openView = async (next: View) => {
+    setView(next);
+    setBooks([]);
+    if (!libraryId) return;
+    setBusy(true);
+    try {
+      if (next === "library") {
+        setBooks((await browseLibrary(libraryId, 0, 24)).items);
+      } else if (next === "home") {
+        setBooks(await getContinueListening(libraryId));
+      }
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doSearch = async () => {
+    if (!libraryId || !query.trim()) return;
+    setBusy(true);
+    try {
+      setBooks(await searchLibrary(libraryId, query));
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!state) return <div style={{ padding: 16 }}>Loading Audiobookshelf…</div>;
+  if (!state.configured) return <Setup initial={state} onConnected={refresh} />;
+
+  return (
+    <div style={{ background: colors.surface, minHeight: "100%" }}>
+      <Player playback={state.playback} cover={cover} run={runPlayback} />
+      {error && <div style={{ color: colors.error, padding: "0 12px 8px" }}>{error}</div>}
+      <PanelSection title="Browse">
+        {libraries.length > 1 && libraries.map((library) => (
+          <PanelSectionRow key={library.id}>
+            <ButtonItem layout="below" onClick={() => setLibraryId(library.id)}>
+              {library.id === libraryId ? `✓ ${library.name}` : library.name}
+            </ButtonItem>
+          </PanelSectionRow>
+        ))}
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => openView("home")}>Continue Listening</ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => openView("library")}>Library</ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => openView("search")}><FaSearch /> Search</ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => setView("settings")}><FaCog /> Settings</ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+
+      {view === "search" && (
+        <PanelSection title="Search">
+          <PanelSectionRow>
+            <TextField label="Title, author, or series" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" disabled={!query.trim() || busy} onClick={doSearch}>Search</ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
+
+      {view === "settings" ? (
+        <PanelSection title="Settings">
+          <div style={{ color: colors.muted, padding: "8px 0" }}>{state.serverUrl}</div>
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={async () => {
+                await logout();
+                await refresh();
+              }}
+            >
+              Sign out
+            </ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
+      ) : (
+        <BookList
+          title={busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
+          books={books}
+          onPlay={play}
+        />
+      )}
+    </div>
+  );
+}
+
+export default definePlugin(() => ({
+  name: "Audiobookshelf",
+  titleView: <div className={staticClasses.Title}>Audiobookshelf</div>,
+  content: <Content />,
+  icon: <FaBookOpen />,
+}));
