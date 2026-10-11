@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Build a portable, audio-only mpv for SteamOS. FFmpeg, libass, and libplacebo
 # are linked statically by mpv-build; standard Linux audio/font libraries remain
-# dynamic so the process connects to the Deck's normal PipeWire/Pulse session.
+# dynamic so the process connects to SteamOS's PipeWire-Pulse compatibility
+# server. This keeps the binary compatible with older SteamOS library versions.
 
 if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
   echo "This player build targets x86_64 Linux (Steam Deck)." >&2
@@ -35,7 +36,7 @@ cat > mpv_options <<'EOF'
 -Dbuild-date=false
 -Dgl=disabled
 -Dlibmpv=false
--Dpipewire=enabled
+-Dpipewire=disabled
 -Dpulse=enabled
 EOF
 

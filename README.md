@@ -48,7 +48,7 @@ For v0.1, Python is orchestration rather than the audio engine; decoding, buffer
 - For source checkouts, `mpv` available at `/usr/bin/mpv`, on `PATH`, or built as `bin/mpv` with `scripts/build_mpv.sh` on Linux.
 - Node.js 16.14+ and pnpm 9 for development, matching the official Decky template guidance.
 
-`mpv` must include a PipeWire or PulseAudio output. The player requests `pipewire,pulse,alsa` in that order.
+`mpv` must include PulseAudio or ALSA output. On SteamOS, the PulseAudio-compatible output is mixed by PipeWire; the player requests `pulse,alsa` in that order.
 
 ## Build and test
 

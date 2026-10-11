@@ -64,7 +64,7 @@ class MpvPlayer:
                 "--input-default-bindings=no",
                 f"--input-ipc-server={self.socket_path}",
                 "--audio-client-name=Decky Audiobookshelf",
-                "--ao=pipewire,pulse,alsa",
+                "--ao=pulse,alsa",
                 "--volume=100",
             ]
             self.process = subprocess.Popen(args, stdout=log_file, stderr=log_file, close_fds=True)

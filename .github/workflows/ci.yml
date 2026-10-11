@@ -32,8 +32,8 @@ jobs:
           sudo apt-get install -y \
             autoconf automake build-essential git libasound2-dev \
             libfontconfig1-dev libfreetype6-dev libfribidi-dev \
-            libgnutls28-dev libharfbuzz-dev libpipewire-0.3-dev \
-            libpulse-dev libtool nasm ninja-build pkg-config \
+            libgnutls28-dev libharfbuzz-dev libpulse-dev libtool \
+            nasm ninja-build pkg-config \
             python3-jinja2 python3-pip yasm
           python3 -m pip install --user "meson>=1.3,<2"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

@@ -95,6 +95,6 @@ MPRIS is valuable for desktop interoperability and external play/pause/seek cont
 
 ## PipeWire mixing status
 
-mpv is configured for the default non-exclusive PipeWire sink, with PulseAudio and ALSA fallbacks. That is the correct shape for mixing with game audio. Valve's public SteamOS reports show PipeWire sinks in Gaming Mode, but they do not substitute for this project's acceptance test. Simultaneous audiobook/game output remains explicitly **unverified until run on a Steam Deck**.
+mpv is configured for the default non-exclusive PulseAudio-compatible sink, with ALSA fallback. SteamOS implements that compatibility server through PipeWire, so this remains a normal mixed stream rather than exclusive device access. Valve's public SteamOS reports show PipeWire sinks in Gaming Mode, but they do not substitute for this project's acceptance test. Simultaneous audiobook/game output remains explicitly **unverified until run on a Steam Deck**.
 
 The hardware POC must record SteamOS/Decky/mpv versions, current audio output, and the result with at least one native game and one Proton game.
