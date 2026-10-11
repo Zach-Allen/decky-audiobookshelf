@@ -36,7 +36,7 @@ Record device details before starting:
 - [ ] Close the Quick Access menu; audiobook continues.
 - [ ] Reopen the panel; position and play state are current.
 - [ ] Play/pause works.
-- [ ] Seek −30/+30 seconds works across a file boundary.
+- [ ] Seek −15/+15 seconds works across a file boundary.
 - [ ] Previous/next chapter works.
 - [ ] 0.75×, 1×, 1.25×, 1.5×, and 2× retain intelligible pitch.
 - [ ] Switching the Steam audio output moves both streams appropriately.

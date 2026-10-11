@@ -12,7 +12,7 @@ This repository is an early v0.1 proof of concept. It can authenticate with curr
 - Browse book libraries, Continue Listening, and search results.
 - Start/resume the server's official playback session.
 - Play direct or transcoded session tracks in an out-of-CEF `mpv` process.
-- Play/pause, ±30 seconds, previous/next chapter, and 0.5–3× speed.
+- Play/pause, ±15 seconds, previous/next chapter, and 0.5–3× speed.
 - Sync current time and listened time every 15 seconds and close the session on stop/unload.
 - Render all actions with Decky/Steam focusable controls.
 

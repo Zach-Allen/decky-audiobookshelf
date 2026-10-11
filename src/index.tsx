@@ -213,11 +213,11 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
         <span>{formatTime(playback.duration)}</span>
       </div>
       <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8 }}>
-        <DialogButton onClick={() => run(() => seekRelative(-30))}>◀ 30s</DialogButton>
+        <DialogButton onClick={() => run(() => seekRelative(-15))}>◀ 15s</DialogButton>
         <DialogButton onClick={() => run(togglePlayPause)}>
-          {playback.isPlaying ? <FaPause /> : <FaPlay />}
+          {playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
         </DialogButton>
-        <DialogButton onClick={() => run(() => seekRelative(30))}>30s ▶</DialogButton>
+        <DialogButton onClick={() => run(() => seekRelative(15))}>15s ▶</DialogButton>
       </Focusable>
       <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <DialogButton onClick={() => run(previousChapter)}><FaStepBackward /> Chapter</DialogButton>
