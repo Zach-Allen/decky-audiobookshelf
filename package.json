@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "\"$npm_node_execpath\" ./scripts/build.mjs",
+    "package:plugin": "PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/package_plugin.py",
     "watch": "\"$npm_node_execpath\" ./node_modules/rollup/dist/bin/rollup -c -w",
     "typecheck": "\"$npm_node_execpath\" ./node_modules/typescript/bin/tsc --noEmit",
     "test": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v"

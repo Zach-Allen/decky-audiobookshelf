@@ -62,6 +62,24 @@ The build script drives the official Decky Rollup configuration through its API 
 
 ## Install on a development Steam Deck
 
+### Easiest: Decky release zip
+
+Download the zip attached to the latest GitHub release. In Decky, enable Developer Mode, choose **Install Plugin from ZIP**, and select the downloaded file. The official template requires the zip to contain the plugin directory with `dist/index.js`, metadata, backend, and license; `pnpm run package:plugin` creates exactly that layout.
+
+### Clone directly on the Deck
+
+The production frontend entry point is committed, so a Deck does not need Node or pnpm:
+
+```bash
+git clone https://github.com/Zach-Allen/decky-audiobookshelf.git
+cd decky-audiobookshelf
+./install-on-deck.sh
+```
+
+The installer copies the plugin to `~/homebrew/plugins/decky-audiobookshelf` and restarts Decky. Pull and rerun it to update.
+
+### Manual development install
+
 1. Build the frontend.
 2. Copy the repository contents (excluding `.git`, `node_modules`, and tests) to:
 
@@ -78,7 +96,7 @@ The build script drives the official Decky Rollup configuration through its API 
 
 5. Open **… → Decky → Audiobookshelf**, enter the server URL and credentials, and run the POC checklist.
 
-For repeatable releases, the next packaging checkpoint is a Decky-compatible zip with an x86_64 Linux `mpv` artifact and its license notices. Do not redistribute an arbitrary static build without auditing its codec and GPL/LGPL obligations.
+The current release zip does not bundle `mpv`. Check `command -v mpv` on the Deck before testing audio. Do not redistribute an arbitrary static build without auditing its codec and GPL/LGPL obligations.
 
 ## Security notes
 

@@ -32,8 +32,10 @@ bower_components
 .DS_Store
 Thumbs.db
 
-# Ignore built ts files
-dist/
+# Keep the production entry point so a Deck can install directly from a clone.
+# Source maps and other generated files remain local-only.
+dist/*
+!dist/index.js
 
 __pycache__/
 
