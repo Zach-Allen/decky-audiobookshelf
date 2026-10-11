@@ -44,7 +44,8 @@ For v0.1, Python is orchestration rather than the audio engine; decoding, buffer
 
 - Decky Loader using plugin API v1.
 - An Audiobookshelf server with a book library.
-- `mpv` available at `/usr/bin/mpv`, on `PATH`, or bundled as `bin/mpv`.
+- A tagged release ZIP, which bundles an audio-only `mpv` executable built from pinned upstream sources.
+- For source checkouts, `mpv` available at `/usr/bin/mpv`, on `PATH`, or built as `bin/mpv` with `scripts/build_mpv.sh` on Linux.
 - Node.js 16.14+ and pnpm 9 for development, matching the official Decky template guidance.
 
 `mpv` must include a PipeWire or PulseAudio output. The player requests `pipewire,pulse,alsa` in that order.
@@ -87,7 +88,7 @@ The installer copies the plugin to `~/homebrew/plugins/decky-audiobookshelf` and
    /home/deck/homebrew/plugins/decky-audiobookshelf/
    ```
 
-3. If SteamOS does not provide `mpv`, place a compatible executable at `bin/mpv` and make it executable.
+3. Tagged release ZIPs include `bin/mpv`. Source deployments can instead provide `mpv` on `PATH` or build the pinned player with `scripts/build_mpv.sh bin/mpv` on Linux.
 4. Restart the Decky plugin loader:
 
    ```bash
@@ -96,7 +97,7 @@ The installer copies the plugin to `~/homebrew/plugins/decky-audiobookshelf` and
 
 5. Open **… → Decky → Audiobookshelf**, enter the server URL and credentials, and run the POC checklist.
 
-The current release zip does not bundle `mpv`. Check `command -v mpv` on the Deck before testing audio. Do not redistribute an arbitrary static build without auditing its codec and GPL/LGPL obligations.
+Tagged release ZIPs build and bundle an audio-only `mpv` from pinned upstream revisions. The build recipe and license/source references are recorded in `scripts/build_mpv.sh` and `THIRD_PARTY_NOTICES.md`.
 
 ## Security notes
 
@@ -119,7 +120,6 @@ docs/POC_CHECKLIST.md           physical Deck acceptance checklist
 
 ## Known gaps
 
-- No bundled `mpv` binary yet.
 - MPRIS is designed but not implemented.
 - OIDC login, offline downloads, sleep timer, bookmarks, podcasts, queues, and multiple servers are out of v0.1 scope.
 - No reconnect after suspend or mpv crash yet.

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Build a portable, audio-only mpv for SteamOS. FFmpeg, libass, and libplacebo
+# are linked statically by mpv-build; standard Linux audio/font libraries remain
+# dynamic so the process connects to the Deck's normal PipeWire/Pulse session.
+
+if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+  echo "This player build targets x86_64 Linux (Steam Deck)." >&2
+  exit 1
+fi
+
+output_path="${1:-bin/mpv}"
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${output_path}" != /* ]]; then
+  output_path="${project_dir}/${output_path#./}"
+fi
+
+build_dir="$(mktemp -d)"
+trap 'rm -rf "${build_dir}"' EXIT
+
+git clone https://github.com/mpv-player/mpv-build.git "${build_dir}/mpv-build"
+cd "${build_dir}/mpv-build"
+git checkout 9443097290e82008f26f1597590926c63e7ae053
+
+mkdir -p config
+printf '%s\n' '@e48ac7ce08462f5e33af6ef9deeac6fa87eef01e' > config/branch-mpv
+printf '%s\n' '@db69d06eeeab4f46da15030a80d539efb4503ca8' > config/branch-ffmpeg
+printf '%s\n' '@e46aedea0a0d17da4c4ef49d84b94a7994664ab5' > config/branch-libass
+printf '%s\n' '@1fd3c7bde7b943fe8985c893310b5269a09b46c5' > config/branch-libplacebo
+
+cat > mpv_options <<'EOF'
+-Dauto_features=disabled
+-Dalsa=enabled
+-Dbuild-date=false
+-Dgl=disabled
+-Dlibmpv=false
+-Dpipewire=enabled
+-Dpulse=enabled
+EOF
+
+cat > libplacebo_options <<'EOF'
+-Dglslang=disabled
+-Dopengl=disabled
+-Dvulkan=disabled
+EOF
+
+./update --skip-selfupdate
+./build -j"$(nproc)"
+
+mkdir -p "$(dirname "${output_path}")"
+install -m 0755 mpv/build/mpv "${output_path}"
+echo "Built ${output_path}"

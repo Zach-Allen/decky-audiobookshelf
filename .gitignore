@@ -57,3 +57,6 @@ out/*
 cli/
 cli/*
 cli/decky
+
+# Produced by scripts/build_mpv.sh for tagged release packages.
+/bin/mpv

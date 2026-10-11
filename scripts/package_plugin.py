@@ -20,6 +20,7 @@ def iter_payload_files():
         ROOT / "package.json",
         ROOT / "plugin.json",
         ROOT / "LICENSE",
+        ROOT / "THIRD_PARTY_NOTICES.md",
         ROOT / "README.md",
     ]
     for path in required:

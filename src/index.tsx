@@ -370,6 +370,11 @@ function Content() {
   return (
     <div style={{ background: colors.surface, minHeight: "100%" }}>
       <Player playback={state.playback} cover={cover} run={runPlayback} />
+      {!state.playback.available && (
+        <div style={{ color: colors.error, padding: "0 12px 8px" }}>
+          Audio engine unavailable. Install a release that includes the bundled player.
+        </div>
+      )}
       {error && <div style={{ color: colors.error, padding: "0 12px 8px" }}>{error}</div>}
       <PanelSection title="Browse">
         {libraries.length > 1 && libraries.map((library) => (
