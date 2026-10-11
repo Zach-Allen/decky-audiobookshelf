@@ -139,7 +139,12 @@ function Setup({ initial, onConnected }: { initial: PluginState; onConnected: ()
   return (
     <PanelSection title="Connect to Audiobookshelf">
       <PanelSectionRow>
-        <TextField label="Server address" value={serverUrl} mustBeURL onChange={(event) => setServerUrl(event.target.value)} />
+        <TextField
+          label="Server address"
+          description="Include http:// or https:// and the port, if needed."
+          value={serverUrl}
+          onChange={(event) => setServerUrl(event.target.value)}
+        />
       </PanelSectionRow>
       <PanelSectionRow>
         <TextField label="Username" value={username} onChange={(event) => setUsername(event.target.value)} />
