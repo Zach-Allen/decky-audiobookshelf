@@ -12,6 +12,8 @@ git checkout 9443097290e82008f26f1597590926c63e7ae053
 mkdir -p config
 printf '%s\n' '@e48ac7ce08462f5e33af6ef9deeac6fa87eef01e' > config/branch-mpv
 printf '%s\n' '@db69d06eeeab4f46da15030a80d539efb4503ca8' > config/branch-ffmpeg
+# mpv-build currently prepares these helper libraries before applying mpv's
+# feature switches. They are not linked into the final audio-only executable.
 printf '%s\n' '@e46aedea0a0d17da4c4ef49d84b94a7994664ab5' > config/branch-libass
 printf '%s\n' '@1fd3c7bde7b943fe8985c893310b5269a09b46c5' > config/branch-libplacebo
 
