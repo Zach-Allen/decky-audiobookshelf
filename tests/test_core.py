@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "py_modules"))
 
@@ -161,6 +162,45 @@ class PlayerMappingTests(unittest.TestCase):
                 ],
             )
 
+    def test_targets_logged_in_users_pulse_socket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            player = MpvPlayer(directory, directory, FakeLogger())
+            player._find_pulse_socket = lambda: Path("/run/user/1000/pulse/native")
+
+            with mock.patch.dict(
+                os.environ,
+                {"LD_LIBRARY_PATH": "/tmp/decky-private", "LD_LIBRARY_PATH_ORIG": "/usr/lib"},
+                clear=False,
+            ):
+                environment = player._subprocess_environment()
+
+            self.assertEqual(environment["XDG_RUNTIME_DIR"], "/run/user/1000")
+            self.assertEqual(environment["PULSE_SERVER"], "/run/user/1000/pulse/native")
+            self.assertEqual(environment["PULSE_RUNTIME_PATH"], "/run/user/1000/pulse")
+            self.assertEqual(environment["LD_LIBRARY_PATH"], "/usr/lib")
+            self.assertNotIn("LD_LIBRARY_PATH_ORIG", environment)
+
+    def test_play_reopens_an_idle_track(self):
+        with tempfile.TemporaryDirectory() as directory:
+            player = MpvPlayer(directory, directory, FakeLogger())
+            player._loaded_tracks = [{"contentUrl": "/track.m4b", "startOffset": 0}]
+            player._requested_position = 42
+            player.status = lambda: {
+                "available": True,
+                "isPlaying": False,
+                "isPaused": False,
+                "position": 42,
+                "duration": 300,
+                "speed": 1,
+            }
+            player._get = lambda name, default=None: True if name == "idle-active" else default
+            loads = []
+            player._load_at = lambda position, paused: loads.append((position, paused))
+
+            player.toggle_pause()
+
+            self.assertEqual(loads, [(42, False)])
+
     def test_loads_at_resume_position_without_a_followup_seek(self):
         with tempfile.TemporaryDirectory() as directory:
             player = MpvPlayer(directory, directory, FakeLogger())
@@ -173,7 +213,7 @@ class PlayerMappingTests(unittest.TestCase):
             player._command = lambda *command: commands.append(command)
             player._get = lambda name, default=None: next(property_values[name], default)
 
-            player._load_at(120, paused=False)
+            player._load_at(120, paused=True)
 
             self.assertEqual(
                 commands[0],
@@ -186,7 +226,7 @@ class PlayerMappingTests(unittest.TestCase):
                 ),
             )
             self.assertFalse(any(command[0] == "seek" for command in commands))
-            self.assertEqual(commands[-1], ("set_property", "pause", False))
+            self.assertEqual(commands[-1], ("set_property", "pause", True))
 
 
 if __name__ == "__main__":

@@ -32,6 +32,8 @@ class MpvPlayer:
         self._server_url = ""
         self._access_token = ""
         self._duration = 0.0
+        self._requested_position = 0.0
+        self._pulse_server = ""
 
     def _find_binary(self) -> str:
         bundled = self.plugin_dir / "bin" / "mpv"
@@ -69,6 +71,36 @@ class MpvPlayer:
         detail = self._log_tail()
         return PlayerError(f"{message}: {detail}" if detail else message)
 
+    def _find_pulse_socket(self) -> Path:
+        sockets = [path for path in Path("/run/user").glob("*/pulse/native") if path.exists()]
+        user_sockets = [path for path in sockets if path.parts[-3] != "0"] or sockets
+        user_sockets.sort(
+            key=lambda path: (
+                path.parts[-3] != "1000",
+                int(path.parts[-3]) if path.parts[-3].isdigit() else 2**31,
+            )
+        )
+        return user_sockets[0] if user_sockets else Path("/run/user/1000/pulse/native")
+
+    def _subprocess_environment(self) -> dict[str, str]:
+        env = os.environ.copy()
+        pulse_socket = self._find_pulse_socket()
+        user_runtime = pulse_socket.parents[1]
+        self._pulse_server = str(pulse_socket)
+        env["XDG_RUNTIME_DIR"] = str(user_runtime)
+        env["PULSE_SERVER"] = str(pulse_socket)
+        env["PULSE_RUNTIME_PATH"] = str(pulse_socket.parent)
+
+        # Decky is packaged with PyInstaller. Do not make an external player
+        # load Decky's private copies of system libraries or certificates.
+        for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "SSL_CERT_DIR", "SSL_CERT_FILE"):
+            original = env.pop(f"{name}_ORIG", None)
+            if original is not None:
+                env[name] = original
+            else:
+                env.pop(name, None)
+        return env
+
     def ensure_started(self) -> None:
         with self._lock:
             if self.process and self.process.poll() is None and self.socket_path.exists():
@@ -87,12 +119,23 @@ class MpvPlayer:
                 "--input-default-bindings=no",
                 f"--input-ipc-server={self.socket_path}",
                 "--audio-client-name=Decky Audiobookshelf",
-                "--ao=pulse,alsa",
+                "--ao=pulse",
                 "--volume=100",
             ]
             try:
-                with self.log_path.open("ab", buffering=0) as log_file:
-                    self.process = subprocess.Popen(args, stdout=log_file, stderr=log_file, close_fds=True)
+                environment = self._subprocess_environment()
+                if not Path(self._pulse_server).exists():
+                    raise PlayerError(
+                        f"SteamOS audio socket was not found at {self._pulse_server}"
+                    )
+                with self.log_path.open("wb", buffering=0) as log_file:
+                    self.process = subprocess.Popen(
+                        args,
+                        stdout=log_file,
+                        stderr=log_file,
+                        close_fds=True,
+                        env=environment,
+                    )
             except OSError as error:
                 raise self._failure(f"Could not launch the bundled audio player ({error})") from error
             deadline = time.monotonic() + 5
@@ -100,7 +143,7 @@ class MpvPlayer:
                 if self.process.poll() is not None:
                     raise self._failure(f"Audio player exited during startup (code {self.process.returncode})")
                 if self.socket_path.exists():
-                    self.logger.info("mpv background player started")
+                    self.logger.info(f"mpv background player started with Pulse socket {self._pulse_server}")
                     return
                 time.sleep(0.05)
             self.process.terminate()
@@ -189,6 +232,7 @@ class MpvPlayer:
 
     def _load_at(self, position: float, paused: bool) -> None:
         position = max(0.0, min(position, self._duration or position))
+        self._requested_position = position
         index = self._track_index_at(position)
         self._loaded_tracks = self._tracks[index:]
         first = self._loaded_tracks[0]
@@ -223,6 +267,15 @@ class MpvPlayer:
         if not loaded:
             raise self._failure("The audio player could not open the Audiobookshelf stream")
         self._command("set_property", "pause", paused)
+        if not paused:
+            # Audio-device and decoder failures can occur just after unpausing.
+            # An audiobook cannot legitimately finish this quickly, so surface
+            # mpv's log instead of returning a dead session to the UI.
+            deadline = time.monotonic() + 0.75
+            while time.monotonic() < deadline:
+                time.sleep(0.1)
+                if self._get("idle-active", True):
+                    raise self._failure("The audio player stopped immediately after opening the book")
 
     def status(self) -> dict[str, Any]:
         alive = bool(self.process and self.process.poll() is None and self.socket_path.exists())
@@ -241,11 +294,16 @@ class MpvPlayer:
         playlist_pos = max(0, min(playlist_pos, len(self._loaded_tracks) - 1))
         local_position = float(self._get("time-pos", 0) or 0)
         offset = float(self._loaded_tracks[playlist_pos].get("startOffset") or 0)
+        position = min(offset + local_position, self._duration or offset + local_position)
+        if idle:
+            position = self._requested_position
+        else:
+            self._requested_position = position
         return {
             "available": True,
             "isPlaying": not idle and not paused,
             "isPaused": not idle and paused,
-            "position": min(offset + local_position, self._duration or offset + local_position),
+            "position": position,
             "duration": self._duration,
             "speed": float(self._get("speed", 1.0) or 1.0),
         }
@@ -272,12 +330,17 @@ class MpvPlayer:
             "playerExitCode": self.process.poll() if self.process else None,
             "playerLogTail": self._log_tail(),
             "playerError": "" if available else find_error,
+            "pulseServer": self._pulse_server or str(self._find_pulse_socket()),
+            "pulseSocketExists": self._find_pulse_socket().exists(),
         }
 
     def toggle_pause(self) -> dict[str, Any]:
         current = self.status()
         if not self._loaded_tracks:
             raise PlayerError("Nothing is loaded")
+        if self._get("idle-active", True):
+            self._load_at(self._requested_position, paused=False)
+            return self.status()
         self._command("set_property", "pause", not current["isPaused"])
         return self.status()
 
@@ -303,6 +366,7 @@ class MpvPlayer:
         self._tracks = []
         self._loaded_tracks = []
         self._duration = 0.0
+        self._requested_position = 0.0
 
     def shutdown(self) -> None:
         process = self.process
@@ -321,4 +385,5 @@ class MpvPlayer:
         self._tracks = []
         self._loaded_tracks = []
         self._duration = 0.0
+        self._requested_position = 0.0
         self.socket_path.unlink(missing_ok=True)

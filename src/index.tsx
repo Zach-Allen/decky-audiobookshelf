@@ -17,8 +17,6 @@ import {
   FaPause,
   FaPlay,
   FaSearch,
-  FaStepBackward,
-  FaStepForward,
 } from "react-icons/fa";
 
 interface Library {
@@ -69,7 +67,18 @@ interface PluginState {
   playback: Playback;
 }
 
-type View = "home" | "library" | "search" | "settings";
+interface Diagnostics {
+  playerFound: boolean;
+  playerRunning: boolean;
+  playerExitCode: number | null;
+  playerLogTail: string;
+  playerError: string;
+  pulseServer: string;
+  pulseSocketExists: boolean;
+  lastError: string;
+}
+
+type View = "menu" | "player" | "home" | "library" | "search" | "settings";
 
 const getState = callable<[], PluginState>("get_state");
 const configure = callable<
@@ -91,6 +100,7 @@ const seekRelative = callable<[seconds: number], Playback>("seek_relative");
 const previousChapter = callable<[], Playback>("previous_chapter");
 const nextChapter = callable<[], Playback>("next_chapter");
 const setSpeed = callable<[speed: number], Playback>("set_speed");
+const getDiagnostics = callable<[], Diagnostics>("get_diagnostics");
 
 const colors = {
   surface: "#17191d",
@@ -200,8 +210,8 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
       <div style={{ display: "flex", gap: 12, padding: "4px 0 10px" }}>
         <div
           style={{
-            width: 84,
-            height: 126,
+            width: 68,
+            height: 102,
             borderRadius: 8,
             background: colors.raised,
             flexShrink: 0,
@@ -248,9 +258,22 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
           15s ▶
         </DialogButton>
       </Focusable>
-      <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <DialogButton onClick={() => run(previousChapter)}><FaStepBackward /> Chapter</DialogButton>
-        <DialogButton onClick={() => run(nextChapter)}>Chapter <FaStepForward /></DialogButton>
+      <Focusable
+        flow-children="horizontal"
+        style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8 }}
+      >
+        <DialogButton
+          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+          onClick={() => run(previousChapter)}
+        >
+          ◀ Chapter
+        </DialogButton>
+        <DialogButton
+          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+          onClick={() => run(nextChapter)}
+        >
+          Chapter ▶
+        </DialogButton>
       </Focusable>
       <PanelSectionRow>
         <SliderField
@@ -313,27 +336,25 @@ function Content() {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [libraryId, setLibraryId] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>("menu");
+  const [returnView, setReturnView] = useState<View>("menu");
   const [query, setQuery] = useState("");
   const [cover, setCover] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [startingBookId, setStartingBookId] = useState("");
   const [failedBookId, setFailedBookId] = useState("");
-  const playerRef = useRef<HTMLDivElement>(null);
-  const resultsRef = useRef<HTMLDivElement>(null);
-
-  const scrollTo = useCallback((target: HTMLDivElement | null) => {
-    // Decky's panel owns the scroll container. Two frames let React commit the
-    // newly selected view before asking that container to reveal it.
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => target?.scrollIntoView({ behavior: "smooth", block: "start" }));
-    });
-  }, []);
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
+  const initializedView = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
-      setState(await getState());
+      const next = await getState();
+      setState(next);
+      if (!initializedView.current) {
+        initializedView.current = true;
+        if (next.playback.session) setView("player");
+      }
     } catch (reason) {
       setError(errorMessage(reason));
     }
@@ -350,7 +371,7 @@ function Content() {
     getLibraries()
       .then((result) => {
         setLibraries(result);
-        if (!libraryId && result[0]) setLibraryId(result[0].id);
+        setLibraryId((current) => current || result[0]?.id || "");
       })
       .catch((reason) => setError(errorMessage(reason)));
   }, [state?.configured]);
@@ -363,23 +384,6 @@ function Content() {
     }
     getCover(itemId).then(setCover).catch(() => setCover(""));
   }, [state?.playback.session?.libraryItemId]);
-
-  const loadHome = useCallback(async () => {
-    if (!libraryId) return;
-    setBusy(true);
-    try {
-      setBooks(await getContinueListening(libraryId));
-      setError("");
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
-  }, [libraryId]);
-
-  useEffect(() => {
-    if (view === "home") loadHome();
-  }, [view, loadHome]);
 
   const runPlayback = async (action: () => Promise<Playback>): Promise<boolean> => {
     try {
@@ -396,20 +400,26 @@ function Content() {
   };
 
   const play = async (book: Book) => {
+    const sourceView = view;
     setStartingBookId(book.id);
     setFailedBookId("");
     setError("");
     const started = await runPlayback(() => playItem(book.id));
     setStartingBookId("");
     setFailedBookId(started ? "" : book.id);
-    if (started) scrollTo(playerRef.current);
+    if (started) {
+      setReturnView(sourceView);
+      setView("player");
+    }
   };
 
   const openView = async (next: View) => {
     setView(next);
-    setBooks([]);
     setFailedBookId("");
+    setError("");
+    if (next !== "home" && next !== "library") return;
     if (!libraryId) return;
+    setBooks([]);
     setBusy(true);
     try {
       if (next === "library") {
@@ -418,7 +428,6 @@ function Content() {
         setBooks(await getContinueListening(libraryId));
       }
       setError("");
-      if (next === "home" || next === "library") scrollTo(resultsRef.current);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -433,7 +442,6 @@ function Content() {
       setBooks(await searchLibrary(libraryId, query));
       setFailedBookId("");
       setError("");
-      scrollTo(resultsRef.current);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -444,39 +452,131 @@ function Content() {
   if (!state) return <div style={{ padding: 16 }}>Loading Audiobookshelf…</div>;
   if (!state.configured) return <Setup initial={state} onConnected={refresh} />;
 
-  return (
-    <div style={{ background: colors.surface, minHeight: "100%" }}>
-      <div ref={playerRef} style={{ scrollMarginTop: 8 }}>
+  const errorBanner = error || state.error;
+  const returnLabel = returnView === "home"
+    ? "Continue Listening"
+    : returnView === "library"
+      ? "Library"
+      : returnView === "search"
+        ? "Search"
+        : "Browse";
+
+  if (view === "player") {
+    return (
+      <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
         <Player playback={state.playback} cover={cover} run={runPlayback} />
+        {errorBanner && <div style={{ color: colors.error, padding: "0 12px 8px", overflowWrap: "anywhere" }}>{errorBanner}</div>}
+        <PanelSection>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setView(returnView)}>← Back to {returnLabel}</ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
       </div>
-      {!state.playback.available && (
-        <div style={{ color: colors.error, padding: "0 12px 8px" }}>
-          Audio engine unavailable. Install a release that includes the bundled player.
-        </div>
-      )}
-      {error && <div style={{ color: colors.error, padding: "0 12px 8px" }}>{error}</div>}
-      <PanelSection title="Browse">
-        {libraries.length > 1 && libraries.map((library) => (
-          <PanelSectionRow key={library.id}>
-            <ButtonItem layout="below" onClick={() => setLibraryId(library.id)}>
-              {library.id === libraryId ? `✓ ${library.name}` : library.name}
+    );
+  }
+
+  if (view === "menu") {
+    return (
+      <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
+        {errorBanner && <div style={{ color: colors.error, padding: "8px 12px", overflowWrap: "anywhere" }}>{errorBanner}</div>}
+        <PanelSection title="Audiobookshelf">
+          {state.playback.session && (
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                label={state.playback.session.title}
+                description={state.playback.chapter?.title || "Now Playing"}
+                onClick={() => {
+                  setReturnView("menu");
+                  setView("player");
+                }}
+              >
+                Open Player
+              </ButtonItem>
+            </PanelSectionRow>
+          )}
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => openView("home")}>Continue Listening</ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => openView("library")}>Library</ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => openView("search")}><FaSearch /> Search</ButtonItem>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => openView("settings")}><FaCog /> Settings</ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
+        <PanelSection title="Library">
+          {libraries.length > 1 && libraries.map((library) => (
+            <PanelSectionRow key={library.id}>
+              <ButtonItem layout="below" onClick={() => setLibraryId(library.id)}>
+                {library.id === libraryId ? `✓ ${library.name}` : library.name}
+              </ButtonItem>
+            </PanelSectionRow>
+          ))}
+          {libraries.length === 1 && <div style={{ color: colors.muted, padding: "8px 0" }}>{libraries[0].name}</div>}
+        </PanelSection>
+      </div>
+    );
+  }
+
+  if (view === "settings") {
+    return (
+      <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
+        <PanelSection title="Settings">
+          <PanelSectionRow>
+            <ButtonItem layout="below" onClick={() => setView("menu")}>← Back to Browse</ButtonItem>
+          </PanelSectionRow>
+          <div style={{ color: colors.muted, padding: "8px 0", overflowWrap: "anywhere" }}>{state.serverUrl}</div>
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={async () => {
+                try {
+                  setDiagnostics(await getDiagnostics());
+                } catch (reason) {
+                  setError(errorMessage(reason));
+                }
+              }}
+            >
+              Refresh Diagnostics
             </ButtonItem>
           </PanelSectionRow>
-        ))}
+          {diagnostics && (
+            <div style={{ color: colors.muted, fontSize: 11, padding: "8px 0", overflowWrap: "anywhere" }}>
+              <div>Pulse socket: {diagnostics.pulseServer} ({diagnostics.pulseSocketExists ? "found" : "missing"})</div>
+              <div>Player: {diagnostics.playerRunning ? "running" : `stopped (${diagnostics.playerExitCode ?? "no exit code"})`}</div>
+              {(diagnostics.lastError || diagnostics.playerError) && <div>Error: {diagnostics.lastError || diagnostics.playerError}</div>}
+              {diagnostics.playerLogTail && <div>mpv: {diagnostics.playerLogTail}</div>}
+            </div>
+          )}
+          <PanelSectionRow>
+            <ButtonItem
+              layout="below"
+              onClick={async () => {
+                await logout();
+                setView("menu");
+                await refresh();
+              }}
+            >
+              Sign out
+            </ButtonItem>
+          </PanelSectionRow>
+        </PanelSection>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
+      <PanelSection>
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => openView("home")}>Continue Listening</ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => openView("library")}>Library</ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => openView("search")}><FaSearch /> Search</ButtonItem>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => setView("settings")}><FaCog /> Settings</ButtonItem>
+          <ButtonItem layout="below" onClick={() => setView("menu")}>← Back to Browse</ButtonItem>
         </PanelSectionRow>
       </PanelSection>
-
+      {errorBanner && <div style={{ color: colors.error, padding: "0 12px 8px", overflowWrap: "anywhere" }}>{errorBanner}</div>}
       {view === "search" && (
         <PanelSection title="Search">
           <PanelSectionRow>
@@ -487,33 +587,19 @@ function Content() {
           </PanelSectionRow>
         </PanelSection>
       )}
-
-      {view === "settings" ? (
-        <PanelSection title="Settings">
-          <div style={{ color: colors.muted, padding: "8px 0" }}>{state.serverUrl}</div>
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              onClick={async () => {
-                await logout();
-                await refresh();
-              }}
-            >
-              Sign out
-            </ButtonItem>
-          </PanelSectionRow>
+      {busy ? (
+        <PanelSection title="Loading…">
+          <div style={{ color: colors.muted, padding: "8px 0" }}>Loading books…</div>
         </PanelSection>
       ) : (
-        <div ref={resultsRef} style={{ scrollMarginTop: 8 }}>
-          <BookList
-            title={busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
-            books={books}
-            onPlay={play}
-            startingBookId={startingBookId}
-            failedBookId={failedBookId}
-            playbackError={error || state.error}
-          />
-        </div>
+        <BookList
+          title={view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
+          books={books}
+          onPlay={play}
+          startingBookId={startingBookId}
+          failedBookId={failedBookId}
+          playbackError={errorBanner}
+        />
       )}
     </div>
   );
