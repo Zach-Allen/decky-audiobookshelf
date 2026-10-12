@@ -119,6 +119,25 @@ class PlayerMappingTests(unittest.TestCase):
             self.assertEqual(selected.read_bytes(), b"player")
             self.assertTrue(os.access(selected, os.X_OK))
 
+    def test_sets_http_headers_through_idle_safe_options_namespace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            player = MpvPlayer(directory, directory, FakeLogger())
+            commands = []
+            player._command = lambda *command: commands.append(command)
+
+            player._set_http_headers("test-token")
+
+            self.assertEqual(
+                commands,
+                [
+                    (
+                        "set_property",
+                        "options/http-header-fields",
+                        ["Authorization: Bearer test-token"],
+                    )
+                ],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

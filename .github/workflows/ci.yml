@@ -42,7 +42,7 @@ jobs:
             --entrypoint /bin/bash \
             --volume "$PWD/bin:/output:ro" \
             decky-audiobookshelf-player \
-            -lc 'ldd /output/mpv && /output/mpv --version'
+            -lc 'ldd /output/mpv && /output/mpv --version && python /usr/local/bin/smoke_test_mpv.py /output/mpv'
       - run: pnpm run package:plugin
       - uses: actions/upload-artifact@v4
         with:

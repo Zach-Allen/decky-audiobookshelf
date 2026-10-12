@@ -128,7 +128,10 @@ class MpvPlayer:
                             if response.get("request_id") != request_id:
                                 continue
                             if response.get("error") != "success":
-                                raise PlayerError(f"mpv command failed: {response.get('error')}")
+                                command_name = str(command[0]) if command else "unknown"
+                                raise PlayerError(
+                                    f"mpv command {command_name!r} failed: {response.get('error')}"
+                                )
                             return response.get("data")
             except (OSError, json.JSONDecodeError) as error:
                 raise PlayerError(f"Could not communicate with mpv: {error}") from error
@@ -163,15 +166,25 @@ class MpvPlayer:
         self._access_token = access_token
         self._duration = float(session.get("duration") or 0)
         self.ensure_started()
-        self._command("set_property", "http-header-fields", [f"Authorization: Bearer {access_token}"])
+        self._set_http_headers(access_token)
         self._load_at(float(session.get("startTime") or 0), paused=False)
         return self.status()
+
+    def _set_http_headers(self, access_token: str) -> None:
+        # http-header-fields is an mpv option rather than a top-level property.
+        # The options/ namespace is writable while the player is idle and also
+        # updates the header used when subsequent playlist tracks are opened.
+        self._command(
+            "set_property",
+            "options/http-header-fields",
+            [f"Authorization: Bearer {access_token}"],
+        )
 
     def update_access_token(self, access_token: str) -> None:
         """Update headers used for tracks mpv has not opened yet."""
         self._access_token = access_token
         if self.process and self.process.poll() is None and self.socket_path.exists():
-            self._command("set_property", "http-header-fields", [f"Authorization: Bearer {access_token}"])
+            self._set_http_headers(access_token)
 
     def _load_at(self, position: float, paused: bool) -> None:
         position = max(0.0, min(position, self._duration or position))
