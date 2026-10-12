@@ -149,15 +149,16 @@ class MpvPlayer:
             self.process.terminate()
             raise self._failure("Timed out waiting for the audio player")
 
-    def _command(self, *command: Any) -> Any:
+    def _command(self, *command: Any, timeout: float = 10.0) -> Any:
         with self._lock:
             self.ensure_started()
             self._request_id += 1
             request_id = self._request_id
             payload = json.dumps({"command": list(command), "request_id": request_id}).encode() + b"\n"
+            command_name = str(command[0]) if command else "unknown"
             try:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                    client.settimeout(3)
+                    client.settimeout(timeout)
                     client.connect(str(self.socket_path))
                     client.sendall(payload)
                     buffer = b""
@@ -172,20 +173,87 @@ class MpvPlayer:
                             if response.get("request_id") != request_id:
                                 continue
                             if response.get("error") != "success":
-                                command_name = str(command[0]) if command else "unknown"
                                 raise PlayerError(
                                     f"mpv command {command_name!r} failed: {response.get('error')}"
                                 )
                             return response.get("data")
             except (OSError, json.JSONDecodeError) as error:
-                raise PlayerError(f"Could not communicate with mpv: {error}") from error
+                raise PlayerError(
+                    f"Could not communicate with mpv while running {command_name!r}: {error}"
+                ) from error
 
-    def _get(self, name: str, default: Any = None) -> Any:
+    def _get(self, name: str, default: Any = None, timeout: float = 1.0) -> Any:
         try:
-            result = self._command("get_property", name)
+            result = self._command("get_property", name, timeout=timeout)
             return default if result is None else result
         except PlayerError:
             return default
+
+    def _load_file_and_wait(
+        self,
+        url: str,
+        options: dict[str, str],
+        timeout: float = 30.0,
+    ) -> None:
+        """Load one URL and wait for mpv's definitive file-loaded event.
+
+        mpv's loadfile command returns before a network file begins opening. A
+        separate command sent immediately afterward can therefore block behind
+        the demuxer. Keeping this IPC connection open lets mpv tell us when the
+        file is genuinely ready without polling its busy control core.
+        """
+        with self._lock:
+            self.ensure_started()
+            self._request_id += 1
+            request_id = self._request_id
+            payload = json.dumps(
+                {
+                    "command": ["loadfile", url, "replace", -1, options],
+                    "request_id": request_id,
+                }
+            ).encode() + b"\n"
+            deadline = time.monotonic() + timeout
+            command_succeeded = False
+            opening_current_file = False
+            try:
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.connect(str(self.socket_path))
+                    client.sendall(payload)
+                    buffer = b""
+                    while time.monotonic() < deadline:
+                        client.settimeout(max(0.1, deadline - time.monotonic()))
+                        chunk = client.recv(65536)
+                        if not chunk:
+                            raise PlayerError("mpv closed its control socket while opening the stream")
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            message = json.loads(line)
+                            if message.get("request_id") == request_id:
+                                if message.get("error") != "success":
+                                    raise PlayerError(
+                                        f"mpv command 'loadfile' failed: {message.get('error')}"
+                                    )
+                                command_succeeded = True
+                            event = message.get("event")
+                            if event == "start-file":
+                                opening_current_file = True
+                            elif event == "file-loaded" and command_succeeded:
+                                return
+                            elif event == "end-file" and opening_current_file:
+                                reason = message.get("reason") or message.get("error") or "unknown error"
+                                raise self._failure(
+                                    f"mpv could not open the Audiobookshelf stream ({reason})"
+                                )
+            except socket.timeout as error:
+                raise self._failure(
+                    "Timed out waiting for mpv to open the Audiobookshelf stream"
+                ) from error
+            except (OSError, json.JSONDecodeError) as error:
+                raise PlayerError(
+                    f"Could not communicate with mpv while opening the stream: {error}"
+                ) from error
+            raise self._failure("Timed out waiting for mpv to open the Audiobookshelf stream")
 
     def _absolute_url(self, path: str) -> str:
         if path.startswith("http://") or path.startswith("https://"):
@@ -244,29 +312,19 @@ class MpvPlayer:
         # demuxer. This avoids the race where a separate seek command arrives
         # before a remote file has finished becoming seekable.
         load_options = {"start": str(local_position)} if local_position else {}
-        self._command(
-            "loadfile",
-            self._absolute_url(first_url),
-            "replace",
-            -1,
-            load_options,
-        )
+        # Set the desired state while mpv is idle. In particular, unpausing
+        # after loadfile can block behind a remote demuxer open on SteamOS.
+        self._command("set_property", "pause", paused)
+        self._load_file_and_wait(self._absolute_url(first_url), load_options)
+
+        # Do not append the rest of a multi-file audiobook until the first file
+        # is actually open. loadfile returns before opening begins, and queuing
+        # these immediately was the source of intermittent three-second IPC
+        # timeouts on real Decks.
         for track in self._loaded_tracks[1:]:
             url = track.get("contentUrl")
             if url:
                 self._command("loadfile", self._absolute_url(url), "append")
-        deadline = time.monotonic() + 10
-        loaded = False
-        while time.monotonic() < deadline:
-            if self.process and self.process.poll() is not None:
-                raise self._failure(f"Audio player exited while opening the stream (code {self.process.returncode})")
-            if not self._get("idle-active", True):
-                loaded = True
-                break
-            time.sleep(0.05)
-        if not loaded:
-            raise self._failure("The audio player could not open the Audiobookshelf stream")
-        self._command("set_property", "pause", paused)
         if not paused:
             # Audio-device and decoder failures can occur just after unpausing.
             # An audiobook cannot legitimately finish this quickly, so surface
@@ -372,7 +430,7 @@ class MpvPlayer:
         process = self.process
         if process and process.poll() is None:
             try:
-                self._command("quit")
+                self._command("quit", timeout=1.0)
                 process.wait(timeout=2)
             except (PlayerError, subprocess.TimeoutExpired):
                 process.terminate()

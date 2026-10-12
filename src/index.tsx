@@ -193,7 +193,17 @@ function Setup({ initial, onConnected }: { initial: PluginState; onConnected: ()
   );
 }
 
-function Player({ playback, cover, run }: { playback: Playback; cover: string; run: (action: () => Promise<Playback>) => void }) {
+function Player({
+  playback,
+  cover,
+  loading = false,
+  run,
+}: {
+  playback: Playback;
+  cover: string;
+  loading?: boolean;
+  run: (action: () => Promise<Playback>) => void;
+}) {
   if (!playback.session) {
     return (
       <PanelSection title="Now Playing">
@@ -224,7 +234,7 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
           <div style={{ color: colors.text, fontSize: 17, fontWeight: 700 }}>{playback.session.title}</div>
           <div style={{ color: colors.muted, marginTop: 3 }}>{playback.session.author}</div>
           <div style={{ color: colors.accent, marginTop: 12, fontWeight: 600 }}>
-            {playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}`}
+            {loading ? "Opening audiobook…" : playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}`}
           </div>
         </div>
       </div>
@@ -240,18 +250,21 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
         style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}
       >
         <DialogButton
+          disabled={loading}
           style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
           onClick={() => run(() => seekRelative(-15))}
         >
           ◀ 15s
         </DialogButton>
         <DialogButton
+          disabled={loading}
           style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
           onClick={() => run(togglePlayPause)}
         >
-          {playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
+          {loading ? "Starting…" : playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
         </DialogButton>
         <DialogButton
+          disabled={loading}
           style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
           onClick={() => run(() => seekRelative(15))}
         >
@@ -263,12 +276,14 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
         style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8 }}
       >
         <DialogButton
+          disabled={loading}
           style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
           onClick={() => run(previousChapter)}
         >
           ◀ Chapter
         </DialogButton>
         <DialogButton
+          disabled={loading}
           style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
           onClick={() => run(nextChapter)}
         >
@@ -277,6 +292,7 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
       </Focusable>
       <PanelSectionRow>
         <SliderField
+          disabled={loading}
           label="Playback speed"
           value={playback.speed}
           min={0.5}
@@ -342,6 +358,7 @@ function Content() {
   const [cover, setCover] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [startingBook, setStartingBook] = useState<Book | null>(null);
   const [startingBookId, setStartingBookId] = useState("");
   const [failedBookId, setFailedBookId] = useState("");
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
@@ -401,16 +418,18 @@ function Content() {
 
   const play = async (book: Book) => {
     const sourceView = view;
+    setReturnView(sourceView);
+    setStartingBook(book);
     setStartingBookId(book.id);
     setFailedBookId("");
     setError("");
+    setCover("");
+    setView("player");
+    void getCover(book.id).then(setCover).catch(() => setCover(""));
     const started = await runPlayback(() => playItem(book.id));
+    setStartingBook(null);
     setStartingBookId("");
     setFailedBookId(started ? "" : book.id);
-    if (started) {
-      setReturnView(sourceView);
-      setView("player");
-    }
   };
 
   const openView = async (next: View) => {
@@ -462,9 +481,27 @@ function Content() {
         : "Browse";
 
   if (view === "player") {
+    const playback = startingBook
+      ? {
+          available: state.playback.available,
+          isPlaying: false,
+          isPaused: false,
+          position: startingBook.currentTime,
+          duration: startingBook.duration,
+          speed: 1,
+          session: {
+            id: "",
+            libraryItemId: startingBook.id,
+            title: startingBook.title,
+            author: startingBook.author,
+          },
+          chapter: null,
+          chapterIndex: -1,
+        }
+      : state.playback;
     return (
       <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
-        <Player playback={state.playback} cover={cover} run={runPlayback} />
+        <Player playback={playback} cover={cover} loading={Boolean(startingBook)} run={runPlayback} />
         {errorBanner && <div style={{ color: colors.error, padding: "0 12px 8px", overflowWrap: "anywhere" }}>{errorBanner}</div>}
         <PanelSection>
           <PanelSectionRow>
@@ -480,6 +517,11 @@ function Content() {
       <div style={{ background: colors.surface, minHeight: "100%", overflowX: "hidden" }}>
         {errorBanner && <div style={{ color: colors.error, padding: "8px 12px", overflowWrap: "anywhere" }}>{errorBanner}</div>}
         <PanelSection title="Audiobookshelf">
+          {libraries.length === 1 && (
+            <div style={{ color: colors.muted, padding: "0 0 8px", fontSize: 12 }}>
+              Library: {libraries[0].name}
+            </div>
+          )}
           {state.playback.session && (
             <PanelSectionRow>
               <ButtonItem
@@ -508,16 +550,17 @@ function Content() {
             <ButtonItem layout="below" onClick={() => openView("settings")}><FaCog /> Settings</ButtonItem>
           </PanelSectionRow>
         </PanelSection>
-        <PanelSection title="Library">
-          {libraries.length > 1 && libraries.map((library) => (
-            <PanelSectionRow key={library.id}>
-              <ButtonItem layout="below" onClick={() => setLibraryId(library.id)}>
-                {library.id === libraryId ? `✓ ${library.name}` : library.name}
-              </ButtonItem>
-            </PanelSectionRow>
-          ))}
-          {libraries.length === 1 && <div style={{ color: colors.muted, padding: "8px 0" }}>{libraries[0].name}</div>}
-        </PanelSection>
+        {libraries.length > 1 && (
+          <PanelSection title="Switch library">
+            {libraries.map((library) => (
+              <PanelSectionRow key={library.id}>
+                <ButtonItem layout="below" onClick={() => setLibraryId(library.id)}>
+                  {library.id === libraryId ? `✓ ${library.name}` : library.name}
+                </ButtonItem>
+              </PanelSectionRow>
+            ))}
+          </PanelSection>
+        )}
       </div>
     );
   }

@@ -169,6 +169,7 @@ class AudiobookshelfService:
         await self.stop()
         client = self._require_client()
         session: dict[str, Any] | None = None
+        self.last_error = ""
         try:
             session = await self._call(client.start_playback, item_id, self.settings["deviceId"])
             status = await self._call(

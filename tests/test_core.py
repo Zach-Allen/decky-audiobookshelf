@@ -208,25 +208,47 @@ class PlayerMappingTests(unittest.TestCase):
             player._server_url = "https://example.test"
             player._duration = 300
             commands = []
-            property_values = {"idle-active": iter([False])}
+            loads = []
 
             player._command = lambda *command: commands.append(command)
-            player._get = lambda name, default=None: next(property_values[name], default)
+            player._load_file_and_wait = lambda url, options: loads.append((url, options))
+            player._get = lambda name, default=None: False
 
             player._load_at(120, paused=True)
 
             self.assertEqual(
-                commands[0],
+                loads[0],
                 (
-                    "loadfile",
                     "https://example.test/track.m4b",
-                    "replace",
-                    -1,
                     {"start": "120.0"},
                 ),
             )
             self.assertFalse(any(command[0] == "seek" for command in commands))
-            self.assertEqual(commands[-1], ("set_property", "pause", True))
+            self.assertEqual(commands[0], ("set_property", "pause", True))
+
+    def test_appends_remaining_tracks_only_after_first_file_is_loaded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            player = MpvPlayer(directory, directory, FakeLogger())
+            player._tracks = [
+                {"contentUrl": "/one.m4b", "startOffset": 0},
+                {"contentUrl": "/two.m4b", "startOffset": 60},
+            ]
+            player._server_url = "https://example.test"
+            player._duration = 120
+            events = []
+
+            player._command = lambda *command: events.append(command)
+            player._load_file_and_wait = lambda url, options: events.append(("loaded", url, options))
+            player._get = lambda name, default=None: False
+
+            player._load_at(0, paused=True)
+
+            self.assertEqual(events[0], ("set_property", "pause", True))
+            self.assertEqual(events[1], ("loaded", "https://example.test/one.m4b", {}))
+            self.assertEqual(
+                events[2],
+                ("loadfile", "https://example.test/two.m4b", "append"),
+            )
 
 
 if __name__ == "__main__":
