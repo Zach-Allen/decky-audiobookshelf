@@ -195,38 +195,33 @@ class MpvPlayer:
         first_url = first.get("contentUrl")
         if not first_url:
             raise PlayerError("Playback session returned a track without a content URL")
-        self._command("loadfile", self._absolute_url(first_url), "replace")
+        local_position = max(0.0, position - float(first.get("startOffset") or 0))
+        # Supplying start as a per-file option makes mpv seek while opening the
+        # demuxer. This avoids the race where a separate seek command arrives
+        # before a remote file has finished becoming seekable.
+        load_options = {"start": str(local_position)} if local_position else {}
+        self._command(
+            "loadfile",
+            self._absolute_url(first_url),
+            "replace",
+            -1,
+            load_options,
+        )
         for track in self._loaded_tracks[1:]:
             url = track.get("contentUrl")
             if url:
                 self._command("loadfile", self._absolute_url(url), "append")
-        local_position = max(0.0, position - float(first.get("startOffset") or 0))
         deadline = time.monotonic() + 10
         loaded = False
-        seekable = not bool(local_position)
         while time.monotonic() < deadline:
             if self.process and self.process.poll() is not None:
                 raise self._failure(f"Audio player exited while opening the stream (code {self.process.returncode})")
             if not self._get("idle-active", True):
                 loaded = True
-                if seekable or bool(self._get("seekable", False)):
-                    seekable = True
-                    break
+                break
             time.sleep(0.05)
         if not loaded:
             raise self._failure("The audio player could not open the Audiobookshelf stream")
-        if local_position and not seekable:
-            raise self._failure("The Audiobookshelf stream opened but did not become seekable")
-        if local_position:
-            seek_deadline = time.monotonic() + 3
-            while True:
-                try:
-                    self._command("seek", local_position, "absolute+exact")
-                    break
-                except PlayerError as error:
-                    if time.monotonic() >= seek_deadline:
-                        raise self._failure(f"Could not resume at {local_position:.1f} seconds ({error})") from error
-                    time.sleep(0.1)
         self._command("set_property", "pause", paused)
 
     def status(self) -> dict[str, Any]:
@@ -305,14 +300,25 @@ class MpvPlayer:
                 self._command("stop")
             except PlayerError:
                 pass
+        self._tracks = []
         self._loaded_tracks = []
+        self._duration = 0.0
 
     def shutdown(self) -> None:
-        if self.process and self.process.poll() is None:
+        process = self.process
+        if process and process.poll() is None:
             try:
                 self._command("quit")
-                self.process.wait(timeout=2)
+                process.wait(timeout=2)
             except (PlayerError, subprocess.TimeoutExpired):
-                self.process.terminate()
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2)
         self.process = None
+        self._tracks = []
+        self._loaded_tracks = []
+        self._duration = 0.0
         self.socket_path.unlink(missing_ok=True)

@@ -223,7 +223,10 @@ class AudiobookshelfClient:
                     "manufacturer": "Valve",
                     "model": "Steam Deck",
                 },
-                "forceDirectPlay": False,
+                # mpv supports the source formats Audiobookshelf serves. Asking
+                # the server to transcode creates a live HLS playlist which mpv
+                # can report as non-seekable and is unnecessary on the Deck.
+                "forceDirectPlay": True,
                 "forceTranscode": False,
                 "supportedMimeTypes": [
                     "audio/mpeg",

@@ -130,21 +130,33 @@ class AudiobookshelfService:
     async def get_libraries(self):
         client = self._require_client()
         libraries = await self._call(client.libraries)
+        self.last_error = ""
         return [
             {"id": item.get("id"), "name": item.get("name", "Library"), "mediaType": item.get("mediaType")}
             for item in libraries
         ]
 
     async def get_continue_listening(self, library_id: str):
-        return await self._call(self._require_client().continue_listening, library_id)
+        result = await self._call(self._require_client().continue_listening, library_id)
+        self.last_error = ""
+        return result
 
     async def browse_library(self, library_id: str, page: int = 0, limit: int = 24):
-        return await self._call(self._require_client().browse, library_id, max(0, page), max(1, min(limit, 50)))
+        result = await self._call(
+            self._require_client().browse,
+            library_id,
+            max(0, page),
+            max(1, min(limit, 50)),
+        )
+        self.last_error = ""
+        return result
 
     async def search(self, library_id: str, query: str):
         if not query.strip():
             return []
-        return await self._call(self._require_client().search, library_id, query.strip())
+        result = await self._call(self._require_client().search, library_id, query.strip())
+        self.last_error = ""
+        return result
 
     async def get_book(self, item_id: str):
         return await self._call(self._require_client().item, item_id)
@@ -177,6 +189,14 @@ class AudiobookshelfService:
                     )
                 except ApiError:
                     pass
+            # A failed open can leave mpv holding a dead HLS URL or stale IPC
+            # state. Tear it down completely so the very next Play starts clean.
+            try:
+                await self._call(self.player.shutdown)
+            except Exception:
+                self.logger.exception("Could not reset the audio player after a failed start")
+            self.session = None
+            self._time_listened = 0
             self.last_error = f"Could not start playback: {error}"
             self.logger.exception(self.last_error)
             raise RuntimeError(self.last_error) from error

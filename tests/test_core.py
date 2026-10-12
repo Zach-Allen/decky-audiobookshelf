@@ -58,6 +58,11 @@ class CoreModelTests(unittest.TestCase):
         )
         self.assertEqual(session["tracks"][1]["startOffset"], 60.0)
 
+    def test_session_resume_uses_current_time(self):
+        session = session_view({"currentTime": 125, "startTime": 30})
+
+        self.assertEqual(session["startTime"], 125.0)
+
 
 class ApiTests(unittest.TestCase):
     def test_rejects_server_url_credentials(self):
@@ -89,6 +94,24 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(client.access_token, "new-access")
         self.assertEqual(client.refresh_token, "new-refresh")
         self.assertEqual(len(calls), 3)
+
+    def test_playback_requests_direct_play_for_mpv(self):
+        calls = []
+
+        def transport(method, url, headers, body, _context):
+            calls.append((method, url, headers, body))
+            return 200, b'{"id":"session-1","audioTracks":[]}', {}
+
+        client = AudiobookshelfClient(
+            "https://example.test",
+            access_token="access-token",
+            transport=transport,
+        )
+        client.start_playback("book-1", "deck-1")
+
+        payload = json.loads(calls[0][3])
+        self.assertTrue(payload["forceDirectPlay"])
+        self.assertEqual(payload["mediaPlayer"], "mpv")
 
 
 class PlayerMappingTests(unittest.TestCase):
@@ -138,25 +161,31 @@ class PlayerMappingTests(unittest.TestCase):
                 ],
             )
 
-    def test_waits_until_loaded_track_is_seekable_before_resuming(self):
+    def test_loads_at_resume_position_without_a_followup_seek(self):
         with tempfile.TemporaryDirectory() as directory:
             player = MpvPlayer(directory, directory, FakeLogger())
             player._tracks = [{"contentUrl": "/track.m4b", "startOffset": 0}]
             player._server_url = "https://example.test"
             player._duration = 300
             commands = []
-            property_values = {
-                "idle-active": iter([False, False]),
-                "seekable": iter([False, True]),
-            }
+            property_values = {"idle-active": iter([False])}
 
             player._command = lambda *command: commands.append(command)
             player._get = lambda name, default=None: next(property_values[name], default)
 
             player._load_at(120, paused=False)
 
-            self.assertEqual(commands[0], ("loadfile", "https://example.test/track.m4b", "replace"))
-            self.assertIn(("seek", 120.0, "absolute+exact"), commands)
+            self.assertEqual(
+                commands[0],
+                (
+                    "loadfile",
+                    "https://example.test/track.m4b",
+                    "replace",
+                    -1,
+                    {"start": "120.0"},
+                ),
+            )
+            self.assertFalse(any(command[0] == "seek" for command in commands))
             self.assertEqual(commands[-1], ("set_property", "pause", False))
 
 

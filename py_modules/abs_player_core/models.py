@@ -55,7 +55,13 @@ def session_view(session: dict[str, Any]) -> dict[str, Any]:
         "title": session.get("displayTitle") or "Untitled",
         "author": session.get("displayAuthor") or "",
         "duration": float(session.get("duration") or 0),
-        "startTime": float(session.get("startTime") or 0),
+        # currentTime is the field used by Audiobookshelf's own player. Older
+        # servers also expose startTime, so retain it as a compatibility fallback.
+        "startTime": float(
+            session.get("currentTime")
+            if session.get("currentTime") is not None
+            else session.get("startTime") or 0
+        ),
         "chapters": session.get("chapters") or [],
         "tracks": tracks,
         "playMethod": session.get("playMethod"),

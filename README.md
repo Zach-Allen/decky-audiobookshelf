@@ -65,7 +65,7 @@ The build script drives the official Decky Rollup configuration through its API 
 
 ### Easiest: Decky release zip
 
-**[Download the latest plugin ZIP (v0.1.0-alpha.8)](https://github.com/Zach-Allen/decky-audiobookshelf/releases/download/v0.1.0-alpha.8/decky-audiobookshelf-0.1.0-alpha.8.zip)**
+**[Download the latest plugin ZIP (v0.1.0-alpha.9)](https://github.com/Zach-Allen/decky-audiobookshelf/releases/download/v0.1.0-alpha.9/decky-audiobookshelf-0.1.0-alpha.9.zip)**
 
 In Decky, enable Developer Mode, choose **Install Plugin from ZIP**, and select the downloaded file. The release ZIP is the recommended Deck installation because it includes the SteamOS-compatible player binary. The official template requires the ZIP to contain the plugin directory with `dist/index.js`, metadata, backend, and license; `pnpm run package:plugin` creates exactly that layout.
 

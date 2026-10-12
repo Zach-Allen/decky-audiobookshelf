@@ -381,6 +381,7 @@ function Content() {
   const openView = async (next: View) => {
     setView(next);
     setBooks([]);
+    setFailedBookId("");
     if (!libraryId) return;
     setBusy(true);
     try {
@@ -389,6 +390,7 @@ function Content() {
       } else if (next === "home") {
         setBooks(await getContinueListening(libraryId));
       }
+      setError("");
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -401,6 +403,8 @@ function Content() {
     setBusy(true);
     try {
       setBooks(await searchLibrary(libraryId, query));
+      setFailedBookId("");
+      setError("");
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {

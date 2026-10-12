@@ -74,24 +74,22 @@ def main() -> None:
                 "options/http-header-fields",
                 ["Authorization: Bearer smoke-test-token"],
             )
-            command(socket_path, 2, "loadfile", str(audio_path), "replace")
+            command(socket_path, 2, "loadfile", str(audio_path), "replace", -1, {"start": "2.0"})
 
             request_id = 3
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 try:
-                    seekable = command(socket_path, request_id, "get_property", "seekable")
+                    position = command(socket_path, request_id, "get_property", "time-pos")
                 except RuntimeError:
-                    seekable = False
+                    position = None
                 request_id += 1
-                if seekable:
+                if position is not None and float(position) >= 1.9:
                     break
                 time.sleep(0.05)
             else:
-                raise RuntimeError("loaded smoke-test audio did not become seekable")
+                raise RuntimeError(f"loaded smoke-test audio did not start at 2 seconds (position={position})")
 
-            command(socket_path, request_id, "seek", 2.0, "absolute+exact")
-            request_id += 1
             command(socket_path, request_id, "quit")
             process.wait(timeout=5)
         finally:
@@ -99,7 +97,7 @@ def main() -> None:
                 process.terminate()
                 process.wait(timeout=5)
 
-    print("mpv IPC authorization-header and seek smoke test passed")
+    print("mpv IPC authorization-header and start-position smoke test passed")
 
 
 if __name__ == "__main__":
