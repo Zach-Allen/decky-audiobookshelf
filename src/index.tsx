@@ -10,7 +10,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FaBookOpen,
   FaCog,
@@ -225,12 +225,28 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
         <span>{formatTime(playback.position)}</span>
         <span>{formatTime(playback.duration)}</span>
       </div>
-      <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8 }}>
-        <DialogButton onClick={() => run(() => seekRelative(-15))}>◀ 15s</DialogButton>
-        <DialogButton onClick={() => run(togglePlayPause)}>
+      <Focusable
+        flow-children="horizontal"
+        style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}
+      >
+        <DialogButton
+          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+          onClick={() => run(() => seekRelative(-15))}
+        >
+          ◀ 15s
+        </DialogButton>
+        <DialogButton
+          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+          onClick={() => run(togglePlayPause)}
+        >
           {playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
         </DialogButton>
-        <DialogButton onClick={() => run(() => seekRelative(15))}>15s ▶</DialogButton>
+        <DialogButton
+          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+          onClick={() => run(() => seekRelative(15))}
+        >
+          15s ▶
+        </DialogButton>
       </Focusable>
       <Focusable flow-children="horizontal" style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <DialogButton onClick={() => run(previousChapter)}><FaStepBackward /> Chapter</DialogButton>
@@ -304,6 +320,16 @@ function Content() {
   const [error, setError] = useState("");
   const [startingBookId, setStartingBookId] = useState("");
   const [failedBookId, setFailedBookId] = useState("");
+  const playerRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  const scrollTo = useCallback((target: HTMLDivElement | null) => {
+    // Decky's panel owns the scroll container. Two frames let React commit the
+    // newly selected view before asking that container to reveal it.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => target?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -376,6 +402,7 @@ function Content() {
     const started = await runPlayback(() => playItem(book.id));
     setStartingBookId("");
     setFailedBookId(started ? "" : book.id);
+    if (started) scrollTo(playerRef.current);
   };
 
   const openView = async (next: View) => {
@@ -391,6 +418,7 @@ function Content() {
         setBooks(await getContinueListening(libraryId));
       }
       setError("");
+      if (next === "home" || next === "library") scrollTo(resultsRef.current);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -405,6 +433,7 @@ function Content() {
       setBooks(await searchLibrary(libraryId, query));
       setFailedBookId("");
       setError("");
+      scrollTo(resultsRef.current);
     } catch (reason) {
       setError(errorMessage(reason));
     } finally {
@@ -417,7 +446,9 @@ function Content() {
 
   return (
     <div style={{ background: colors.surface, minHeight: "100%" }}>
-      <Player playback={state.playback} cover={cover} run={runPlayback} />
+      <div ref={playerRef} style={{ scrollMarginTop: 8 }}>
+        <Player playback={state.playback} cover={cover} run={runPlayback} />
+      </div>
       {!state.playback.available && (
         <div style={{ color: colors.error, padding: "0 12px 8px" }}>
           Audio engine unavailable. Install a release that includes the bundled player.
@@ -473,14 +504,16 @@ function Content() {
           </PanelSectionRow>
         </PanelSection>
       ) : (
-        <BookList
-          title={busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
-          books={books}
-          onPlay={play}
-          startingBookId={startingBookId}
-          failedBookId={failedBookId}
-          playbackError={error || state.error}
-        />
+        <div ref={resultsRef} style={{ scrollMarginTop: 8 }}>
+          <BookList
+            title={busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
+            books={books}
+            onPlay={play}
+            startingBookId={startingBookId}
+            failedBookId={failedBookId}
+            playbackError={error || state.error}
+          />
+        </div>
       )}
     </div>
   );
