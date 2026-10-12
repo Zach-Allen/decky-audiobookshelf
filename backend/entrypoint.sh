@@ -2,4 +2,4 @@
 set -eu
 
 cd /backend
-./src/build_mpv.sh ./out/mpv
+./src/build_mpv.sh /backend/out/mpv
