@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import wave
 from pathlib import Path
 
 
@@ -38,12 +40,19 @@ def main() -> None:
     binary = Path(sys.argv[1])
     with tempfile.TemporaryDirectory(prefix="decky-abs-mpv-") as directory:
         socket_path = Path(directory) / "mpv.sock"
+        audio_path = Path(directory) / "seek-test.wav"
+        with wave.open(str(audio_path), "wb") as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(8000)
+            audio.writeframes(struct.pack("<h", 0) * 40000)
         process = subprocess.Popen(
             [
                 str(binary),
                 "--no-config",
                 "--no-video",
                 "--idle=yes",
+                "--pause=yes",
                 "--terminal=no",
                 "--ao=null",
                 f"--input-ipc-server={socket_path}",
@@ -65,14 +74,32 @@ def main() -> None:
                 "options/http-header-fields",
                 ["Authorization: Bearer smoke-test-token"],
             )
-            command(socket_path, 2, "quit")
+            command(socket_path, 2, "loadfile", str(audio_path), "replace")
+
+            request_id = 3
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                try:
+                    seekable = command(socket_path, request_id, "get_property", "seekable")
+                except RuntimeError:
+                    seekable = False
+                request_id += 1
+                if seekable:
+                    break
+                time.sleep(0.05)
+            else:
+                raise RuntimeError("loaded smoke-test audio did not become seekable")
+
+            command(socket_path, request_id, "seek", 2.0, "absolute+exact")
+            request_id += 1
+            command(socket_path, request_id, "quit")
             process.wait(timeout=5)
         finally:
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=5)
 
-    print("mpv IPC authorization-header smoke test passed")
+    print("mpv IPC authorization-header and seek smoke test passed")
 
 
 if __name__ == "__main__":

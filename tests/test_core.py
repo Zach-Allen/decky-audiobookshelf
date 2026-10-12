@@ -138,6 +138,27 @@ class PlayerMappingTests(unittest.TestCase):
                 ],
             )
 
+    def test_waits_until_loaded_track_is_seekable_before_resuming(self):
+        with tempfile.TemporaryDirectory() as directory:
+            player = MpvPlayer(directory, directory, FakeLogger())
+            player._tracks = [{"contentUrl": "/track.m4b", "startOffset": 0}]
+            player._server_url = "https://example.test"
+            player._duration = 300
+            commands = []
+            property_values = {
+                "idle-active": iter([False, False]),
+                "seekable": iter([False, True]),
+            }
+
+            player._command = lambda *command: commands.append(command)
+            player._get = lambda name, default=None: next(property_values[name], default)
+
+            player._load_at(120, paused=False)
+
+            self.assertEqual(commands[0], ("loadfile", "https://example.test/track.m4b", "replace"))
+            self.assertIn(("seek", 120.0, "absolute+exact"), commands)
+            self.assertEqual(commands[-1], ("set_property", "pause", False))
+
 
 if __name__ == "__main__":
     unittest.main()

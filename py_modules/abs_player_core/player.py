@@ -82,6 +82,7 @@ class MpvPlayer:
                 "--no-video",
                 "--audio-display=no",
                 "--idle=yes",
+                "--pause=yes",
                 "--terminal=no",
                 "--input-default-bindings=no",
                 f"--input-ipc-server={self.socket_path}",
@@ -199,18 +200,33 @@ class MpvPlayer:
             url = track.get("contentUrl")
             if url:
                 self._command("loadfile", self._absolute_url(url), "append")
-        deadline = time.monotonic() + 5
+        local_position = max(0.0, position - float(first.get("startOffset") or 0))
+        deadline = time.monotonic() + 10
         loaded = False
+        seekable = not bool(local_position)
         while time.monotonic() < deadline:
+            if self.process and self.process.poll() is not None:
+                raise self._failure(f"Audio player exited while opening the stream (code {self.process.returncode})")
             if not self._get("idle-active", True):
                 loaded = True
-                break
+                if seekable or bool(self._get("seekable", False)):
+                    seekable = True
+                    break
             time.sleep(0.05)
         if not loaded:
             raise self._failure("The audio player could not open the Audiobookshelf stream")
-        local_position = max(0.0, position - float(first.get("startOffset") or 0))
+        if local_position and not seekable:
+            raise self._failure("The Audiobookshelf stream opened but did not become seekable")
         if local_position:
-            self._command("seek", local_position, "absolute+exact")
+            seek_deadline = time.monotonic() + 3
+            while True:
+                try:
+                    self._command("seek", local_position, "absolute+exact")
+                    break
+                except PlayerError as error:
+                    if time.monotonic() >= seek_deadline:
+                        raise self._failure(f"Could not resume at {local_position:.1f} seconds ({error})") from error
+                    time.sleep(0.1)
         self._command("set_property", "pause", paused)
 
     def status(self) -> dict[str, Any]:
