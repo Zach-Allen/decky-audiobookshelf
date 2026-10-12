@@ -35,6 +35,17 @@ class MpvPlayer:
 
     def _find_binary(self) -> str:
         bundled = self.plugin_dir / "bin" / "mpv"
+        if bundled.is_file() and not os.access(bundled, os.X_OK):
+            # Some manual ZIP extractors discard Unix executable bits. Decky's
+            # plugin directory is read-only at runtime, so stage a private copy
+            # in the writable runtime directory and repair its mode there.
+            self.runtime_dir.mkdir(parents=True, exist_ok=True)
+            staged = self.runtime_dir / "mpv"
+            shutil.copyfile(bundled, staged)
+            os.chmod(staged, 0o755)
+            if os.access(staged, os.X_OK):
+                return str(staged)
+
         candidates = [str(bundled), "/usr/bin/mpv", "/bin/mpv"]
         path_mpv = shutil.which("mpv")
         if path_mpv:
@@ -46,6 +57,18 @@ class MpvPlayer:
             "mpv was not found. Install mpv on the Deck or place a compatible executable at bin/mpv."
         )
 
+    def _log_tail(self, limit: int = 1200) -> str:
+        try:
+            text = self.log_path.read_bytes()[-8192:].decode("utf-8", "replace")
+        except OSError:
+            return ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return " | ".join(lines[-8:])[-limit:]
+
+    def _failure(self, message: str) -> PlayerError:
+        detail = self._log_tail()
+        return PlayerError(f"{message}: {detail}" if detail else message)
+
     def ensure_started(self) -> None:
         with self._lock:
             if self.process and self.process.poll() is None and self.socket_path.exists():
@@ -53,7 +76,6 @@ class MpvPlayer:
             self.runtime_dir.mkdir(parents=True, exist_ok=True)
             self.socket_path.unlink(missing_ok=True)
             binary = self._find_binary()
-            log_file = self.log_path.open("ab", buffering=0)
             args = [
                 binary,
                 "--no-config",
@@ -67,17 +89,21 @@ class MpvPlayer:
                 "--ao=pulse,alsa",
                 "--volume=100",
             ]
-            self.process = subprocess.Popen(args, stdout=log_file, stderr=log_file, close_fds=True)
+            try:
+                with self.log_path.open("ab", buffering=0) as log_file:
+                    self.process = subprocess.Popen(args, stdout=log_file, stderr=log_file, close_fds=True)
+            except OSError as error:
+                raise self._failure(f"Could not launch the bundled audio player ({error})") from error
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 if self.process.poll() is not None:
-                    raise PlayerError(f"mpv exited during startup; see {self.log_path}")
+                    raise self._failure(f"Audio player exited during startup (code {self.process.returncode})")
                 if self.socket_path.exists():
                     self.logger.info("mpv background player started")
                     return
                 time.sleep(0.05)
             self.process.terminate()
-            raise PlayerError(f"Timed out waiting for mpv IPC socket; see {self.log_path}")
+            raise self._failure("Timed out waiting for the audio player")
 
     def _command(self, *command: Any) -> Any:
         with self._lock:
@@ -161,10 +187,14 @@ class MpvPlayer:
             if url:
                 self._command("loadfile", self._absolute_url(url), "append")
         deadline = time.monotonic() + 5
+        loaded = False
         while time.monotonic() < deadline:
             if not self._get("idle-active", True):
+                loaded = True
                 break
             time.sleep(0.05)
+        if not loaded:
+            raise self._failure("The audio player could not open the Audiobookshelf stream")
         local_position = max(0.0, position - float(first.get("startOffset") or 0))
         if local_position:
             self._command("seek", local_position, "absolute+exact")
@@ -202,6 +232,23 @@ class MpvPlayer:
             return True
         except PlayerError:
             return False
+
+    def diagnostics(self) -> dict[str, Any]:
+        try:
+            binary = self._find_binary()
+            available = True
+        except PlayerError as error:
+            binary = ""
+            available = False
+            find_error = str(error)
+        return {
+            "playerFound": available,
+            "playerPath": binary,
+            "playerRunning": bool(self.process and self.process.poll() is None),
+            "playerExitCode": self.process.poll() if self.process else None,
+            "playerLogTail": self._log_tail(),
+            "playerError": "" if available else find_error,
+        }
 
     def toggle_pause(self) -> dict[str, Any]:
         current = self.status()

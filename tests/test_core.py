@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -101,6 +102,22 @@ class PlayerMappingTests(unittest.TestCase):
             ]
             self.assertEqual(player._track_index_at(119.5), 1)
             self.assertEqual(player._track_index_at(120), 2)
+
+    def test_stages_bundled_player_when_zip_loses_executable_bit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            bundled = root / "plugin" / "bin" / "mpv"
+            bundled.parent.mkdir(parents=True)
+            bundled.write_bytes(b"player")
+            os.chmod(bundled, 0o644)
+
+            player = MpvPlayer(str(runtime), str(root / "plugin"), FakeLogger())
+            selected = Path(player._find_binary())
+
+            self.assertEqual(selected, runtime / "mpv")
+            self.assertEqual(selected.read_bytes(), b"player")
+            self.assertTrue(os.access(selected, os.X_OK))
 
 
 if __name__ == "__main__":

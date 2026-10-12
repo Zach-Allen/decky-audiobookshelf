@@ -35,7 +35,9 @@ cat > mpv_options <<'EOF'
 -Dalsa=enabled
 -Dbuild-date=false
 -Dgl=disabled
+-Dlibass=disabled
 -Dlibmpv=false
+-Dlibplacebo=disabled
 -Dpipewire=disabled
 -Dpulse=enabled
 EOF

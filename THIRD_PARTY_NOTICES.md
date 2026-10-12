@@ -1,8 +1,8 @@
 # Third-party notices
 
 Tagged release packages may contain an audio-only `mpv` executable in `bin/mpv`.
-It is built without local source modifications by `scripts/build_mpv.sh` from
-the exact revisions below:
+It is built without local source modifications by `backend/src/build_mpv.sh`
+inside Decky's SteamOS/Holo build environment from the exact revisions below:
 
 - [mpv](https://github.com/mpv-player/mpv/tree/e48ac7ce08462f5e33af6ef9deeac6fa87eef01e), GPL-2.0-or-later/LGPL-2.1-or-later
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg/tree/db69d06eeeab4f46da15030a80d539efb4503ca8), LGPL-2.1-or-later with GPL components enabled

@@ -97,7 +97,7 @@ The installer copies the plugin to `~/homebrew/plugins/decky-audiobookshelf` and
 
 5. Open **… → Decky → Audiobookshelf**, enter the server URL and credentials, and run the POC checklist.
 
-Tagged release ZIPs build and bundle an audio-only `mpv` from pinned upstream revisions. The build recipe and license/source references are recorded in `scripts/build_mpv.sh` and `THIRD_PARTY_NOTICES.md`.
+Tagged release ZIPs build and bundle an audio-only `mpv` from pinned upstream revisions inside Decky's SteamOS/Holo build environment. The build recipe and license/source references are recorded in `backend/src/build_mpv.sh` and `THIRD_PARTY_NOTICES.md`.
 
 ## Security notes
 

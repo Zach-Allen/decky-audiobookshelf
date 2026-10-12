@@ -129,7 +129,24 @@ function formatTime(value) {
         : `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 function errorMessage(error) {
-    return error instanceof Error ? error.message : String(error);
+    if (error instanceof Error)
+        return error.message;
+    if (typeof error === "string")
+        return error;
+    if (error && typeof error === "object") {
+        const value = error;
+        for (const key of ["message", "error", "result"]) {
+            if (value[key] && value[key] !== error)
+                return errorMessage(value[key]);
+        }
+        try {
+            return JSON.stringify(error);
+        }
+        catch {
+            return "Unknown playback error";
+        }
+    }
+    return String(error);
 }
 function Setup({ initial, onConnected }) {
     const [serverUrl, setServerUrl] = SP_REACT.useState(initial.serverUrl || "http://");
@@ -168,8 +185,8 @@ function Player({ playback, cover, run }) {
                             overflow: "hidden",
                         }, children: cover && SP_JSX.jsx("img", { src: cover, style: { width: "100%", height: "100%", objectFit: "cover" } }) }), SP_JSX.jsxs("div", { style: { minWidth: 0, alignSelf: "center" }, children: [SP_JSX.jsx("div", { style: { color: colors.text, fontSize: 17, fontWeight: 700 }, children: playback.session.title }), SP_JSX.jsx("div", { style: { color: colors.muted, marginTop: 3 }, children: playback.session.author }), SP_JSX.jsx("div", { style: { color: colors.accent, marginTop: 12, fontWeight: 600 }, children: playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}` })] })] }), SP_JSX.jsx("div", { style: { height: 5, background: "#393c43", borderRadius: 99, overflow: "hidden" }, children: SP_JSX.jsx("div", { style: { height: "100%", width: `${progress}%`, background: colors.accent } }) }), SP_JSX.jsxs("div", { style: { display: "flex", justifyContent: "space-between", color: colors.muted, fontVariantNumeric: "tabular-nums", margin: "5px 0 10px" }, children: [SP_JSX.jsx("span", { children: formatTime(playback.position) }), SP_JSX.jsx("span", { children: formatTime(playback.duration) })] }), SP_JSX.jsxs(DFL.Focusable, { "flow-children": "horizontal", style: { display: "flex", gap: 8 }, children: [SP_JSX.jsx(DFL.DialogButton, { onClick: () => run(() => seekRelative(-15)), children: "\u25C0 15s" }), SP_JSX.jsx(DFL.DialogButton, { onClick: () => run(togglePlayPause), children: playback.isPlaying ? SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(FaPause, {}), " Pause"] }) : SP_JSX.jsxs(SP_JSX.Fragment, { children: [SP_JSX.jsx(FaPlay, {}), " Play"] }) }), SP_JSX.jsx(DFL.DialogButton, { onClick: () => run(() => seekRelative(15)), children: "15s \u25B6" })] }), SP_JSX.jsxs(DFL.Focusable, { "flow-children": "horizontal", style: { display: "flex", gap: 8, marginTop: 8 }, children: [SP_JSX.jsxs(DFL.DialogButton, { onClick: () => run(previousChapter), children: [SP_JSX.jsx(FaStepBackward, {}), " Chapter"] }), SP_JSX.jsxs(DFL.DialogButton, { onClick: () => run(nextChapter), children: ["Chapter ", SP_JSX.jsx(FaStepForward, {})] })] }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.SliderField, { label: "Playback speed", value: playback.speed, min: 0.5, max: 3, step: 0.05, showValue: true, valueSuffix: "\u00D7", onChange: (value) => run(() => setSpeed(value)) }) })] }));
 }
-function BookList({ title, books, onPlay }) {
-    return (SP_JSX.jsxs(DFL.PanelSection, { title: title, children: [books.length === 0 && SP_JSX.jsx("div", { style: { color: colors.muted, padding: "8px 0" }, children: "No books found." }), books.map((book) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", label: book.title, description: `${book.author || "Unknown author"}${book.currentTime ? ` • ${formatTime(book.currentTime)} listened` : ""}`, onClick: () => onPlay(book), children: "Play" }) }, book.id)))] }));
+function BookList({ title, books, onPlay, startingBookId, failedBookId, playbackError, }) {
+    return (SP_JSX.jsxs(DFL.PanelSection, { title: title, children: [books.length === 0 && SP_JSX.jsx("div", { style: { color: colors.muted, padding: "8px 0" }, children: "No books found." }), books.map((book) => (SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(DFL.ButtonItem, { layout: "below", label: book.title, description: `${book.author || "Unknown author"}${book.currentTime ? ` • ${formatTime(book.currentTime)} listened` : ""}`, disabled: Boolean(startingBookId), onClick: () => onPlay(book), children: startingBookId === book.id ? "Starting…" : failedBookId === book.id ? "Retry" : "Play" }), failedBookId === book.id && playbackError && (SP_JSX.jsxs("div", { style: { color: colors.error, padding: "8px 4px 2px", overflowWrap: "anywhere" }, children: ["Playback failed: ", playbackError] }))] }, book.id)))] }));
 }
 function Content() {
     const [state, setState] = SP_REACT.useState(null);
@@ -181,6 +198,8 @@ function Content() {
     const [cover, setCover] = SP_REACT.useState("");
     const [busy, setBusy] = SP_REACT.useState(false);
     const [error, setError] = SP_REACT.useState("");
+    const [startingBookId, setStartingBookId] = SP_REACT.useState("");
+    const [failedBookId, setFailedBookId] = SP_REACT.useState("");
     const refresh = SP_REACT.useCallback(async () => {
         try {
             setState(await getState());
@@ -237,14 +256,23 @@ function Content() {
             const playback = await action();
             setState((current) => current ? { ...current, playback } : current);
             setError("");
+            return true;
         }
         catch (reason) {
             const message = errorMessage(reason);
             setError(message);
             toaster.toast({ title: "Audiobookshelf", body: message });
+            return false;
         }
     };
-    const play = (book) => runPlayback(() => playItem(book.id));
+    const play = async (book) => {
+        setStartingBookId(book.id);
+        setFailedBookId("");
+        setError("");
+        const started = await runPlayback(() => playItem(book.id));
+        setStartingBookId("");
+        setFailedBookId(started ? "" : book.id);
+    };
     const openView = async (next) => {
         setView(next);
         setBooks([]);
@@ -287,7 +315,7 @@ function Content() {
     return (SP_JSX.jsxs("div", { style: { background: colors.surface, minHeight: "100%" }, children: [SP_JSX.jsx(Player, { playback: state.playback, cover: cover, run: runPlayback }), !state.playback.available && (SP_JSX.jsx("div", { style: { color: colors.error, padding: "0 12px 8px" }, children: "Audio engine unavailable. Install a release that includes the bundled player." })), error && SP_JSX.jsx("div", { style: { color: colors.error, padding: "0 12px 8px" }, children: error }), SP_JSX.jsxs(DFL.PanelSection, { title: "Browse", children: [libraries.length > 1 && libraries.map((library) => (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => setLibraryId(library.id), children: library.id === libraryId ? `✓ ${library.name}` : library.name }) }, library.id))), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openView("home"), children: "Continue Listening" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: () => openView("library"), children: "Library" }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", onClick: () => openView("search"), children: [SP_JSX.jsx(FaSearch, {}), " Search"] }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.ButtonItem, { layout: "below", onClick: () => setView("settings"), children: [SP_JSX.jsx(FaCog, {}), " Settings"] }) })] }), view === "search" && (SP_JSX.jsxs(DFL.PanelSection, { title: "Search", children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: "Title, author, or series", value: query, onChange: (event) => setQuery(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", disabled: !query.trim() || busy, onClick: doSearch, children: "Search" }) })] })), view === "settings" ? (SP_JSX.jsxs(DFL.PanelSection, { title: "Settings", children: [SP_JSX.jsx("div", { style: { color: colors.muted, padding: "8px 0" }, children: state.serverUrl }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", onClick: async () => {
                                 await logout();
                                 await refresh();
-                            }, children: "Sign out" }) })] })) : (SP_JSX.jsx(BookList, { title: busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results", books: books, onPlay: play }))] }));
+                            }, children: "Sign out" }) })] })) : (SP_JSX.jsx(BookList, { title: busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results", books: books, onPlay: play, startingBookId: startingBookId, failedBookId: failedBookId, playbackError: error || state.error }))] }));
 }
 var index = definePlugin(() => ({
     name: "Audiobookshelf",

@@ -156,26 +156,30 @@ class AudiobookshelfService:
     async def play_item(self, item_id: str):
         await self.stop()
         client = self._require_client()
-        session = await self._call(client.start_playback, item_id, self.settings["deviceId"])
+        session: dict[str, Any] | None = None
         try:
+            session = await self._call(client.start_playback, item_id, self.settings["deviceId"])
             status = await self._call(
                 self.player.play_session,
                 session,
                 client.server_url,
                 client.access_token,
             )
-        except PlayerError:
-            try:
-                await self._call(
-                    client.close_session,
-                    session["id"],
-                    session.get("startTime", 0),
-                    session.get("duration", 0),
-                    0,
-                )
-            except ApiError:
-                pass
-            raise
+        except Exception as error:
+            if session and session.get("id"):
+                try:
+                    await self._call(
+                        client.close_session,
+                        session["id"],
+                        session.get("startTime", 0),
+                        session.get("duration", 0),
+                        0,
+                    )
+                except ApiError:
+                    pass
+            self.last_error = f"Could not start playback: {error}"
+            self.logger.exception(self.last_error)
+            raise RuntimeError(self.last_error) from error
         self.session = session
         self._time_listened = 0
         self._last_sync = time.monotonic()
@@ -308,7 +312,7 @@ class AudiobookshelfService:
 
     async def get_diagnostics(self):
         return {
-            "playerFound": self.player.binary_available(),
+            **self.player.diagnostics(),
             "playerLog": str(self.player.log_path),
             "serverConfigured": bool(self.settings.get("serverUrl")),
             "hasAccessToken": bool(self.settings.get("accessToken")),

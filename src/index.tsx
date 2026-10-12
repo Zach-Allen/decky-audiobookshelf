@@ -112,7 +112,20 @@ function formatTime(value: number): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const value = error as Record<string, unknown>;
+    for (const key of ["message", "error", "result"]) {
+      if (value[key] && value[key] !== error) return errorMessage(value[key]);
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return "Unknown playback error";
+    }
+  }
+  return String(error);
 }
 
 function Setup({ initial, onConnected }: { initial: PluginState; onConnected: () => void }) {
@@ -239,7 +252,21 @@ function Player({ playback, cover, run }: { playback: Playback; cover: string; r
   );
 }
 
-function BookList({ title, books, onPlay }: { title: string; books: Book[]; onPlay: (book: Book) => void }) {
+function BookList({
+  title,
+  books,
+  onPlay,
+  startingBookId,
+  failedBookId,
+  playbackError,
+}: {
+  title: string;
+  books: Book[];
+  onPlay: (book: Book) => void;
+  startingBookId: string;
+  failedBookId: string;
+  playbackError: string;
+}) {
   return (
     <PanelSection title={title}>
       {books.length === 0 && <div style={{ color: colors.muted, padding: "8px 0" }}>No books found.</div>}
@@ -249,10 +276,16 @@ function BookList({ title, books, onPlay }: { title: string; books: Book[]; onPl
             layout="below"
             label={book.title}
             description={`${book.author || "Unknown author"}${book.currentTime ? ` • ${formatTime(book.currentTime)} listened` : ""}`}
+            disabled={Boolean(startingBookId)}
             onClick={() => onPlay(book)}
           >
-            Play
+            {startingBookId === book.id ? "Starting…" : failedBookId === book.id ? "Retry" : "Play"}
           </ButtonItem>
+          {failedBookId === book.id && playbackError && (
+            <div style={{ color: colors.error, padding: "8px 4px 2px", overflowWrap: "anywhere" }}>
+              Playback failed: {playbackError}
+            </div>
+          )}
         </PanelSectionRow>
       ))}
     </PanelSection>
@@ -269,6 +302,8 @@ function Content() {
   const [cover, setCover] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [startingBookId, setStartingBookId] = useState("");
+  const [failedBookId, setFailedBookId] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -320,19 +355,28 @@ function Content() {
     if (view === "home") loadHome();
   }, [view, loadHome]);
 
-  const runPlayback = async (action: () => Promise<Playback>) => {
+  const runPlayback = async (action: () => Promise<Playback>): Promise<boolean> => {
     try {
       const playback = await action();
       setState((current) => current ? { ...current, playback } : current);
       setError("");
+      return true;
     } catch (reason) {
       const message = errorMessage(reason);
       setError(message);
       toaster.toast({ title: "Audiobookshelf", body: message });
+      return false;
     }
   };
 
-  const play = (book: Book) => runPlayback(() => playItem(book.id));
+  const play = async (book: Book) => {
+    setStartingBookId(book.id);
+    setFailedBookId("");
+    setError("");
+    const started = await runPlayback(() => playItem(book.id));
+    setStartingBookId("");
+    setFailedBookId(started ? "" : book.id);
+  };
 
   const openView = async (next: View) => {
     setView(next);
@@ -429,6 +473,9 @@ function Content() {
           title={busy ? "Loading…" : view === "home" ? "Continue Listening" : view === "library" ? "Library" : "Results"}
           books={books}
           onPlay={play}
+          startingBookId={startingBookId}
+          failedBookId={failedBookId}
+          playbackError={error || state.error}
         />
       )}
     </div>
