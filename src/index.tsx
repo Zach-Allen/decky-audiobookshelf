@@ -204,6 +204,15 @@ function Player({
   loading?: boolean;
   run: (action: () => Promise<Playback>) => void;
 }) {
+  const playerTopRef = useRef<HTMLDivElement>(null);
+  const revealPlayerTop = useCallback(() => {
+    // Steam scrolls only far enough to reveal the newly focused button. Wait
+    // until that automatic adjustment finishes, then align the full player.
+    window.requestAnimationFrame(() => {
+      playerTopRef.current?.scrollIntoView({ block: "start", behavior: "auto" });
+    });
+  }, []);
+
   if (!playback.session) {
     return (
       <PanelSection title="Now Playing">
@@ -216,94 +225,99 @@ function Player({
 
   const progress = playback.duration ? Math.min(100, (playback.position / playback.duration) * 100) : 0;
   return (
-    <PanelSection title="Now Playing">
-      <div style={{ display: "flex", gap: 12, padding: "4px 0 10px" }}>
-        <div
-          style={{
-            width: 68,
-            height: 102,
-            borderRadius: 8,
-            background: colors.raised,
-            flexShrink: 0,
-            overflow: "hidden",
-          }}
-        >
-          {cover && <img src={cover} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-        </div>
-        <div style={{ minWidth: 0, alignSelf: "center" }}>
-          <div style={{ color: colors.text, fontSize: 17, fontWeight: 700 }}>{playback.session.title}</div>
-          <div style={{ color: colors.muted, marginTop: 3 }}>{playback.session.author}</div>
-          <div style={{ color: colors.accent, marginTop: 12, fontWeight: 600 }}>
-            {loading ? "Opening audiobook…" : playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}`}
+    <div ref={playerTopRef} style={{ scrollMarginTop: 8 }}>
+      <PanelSection title="Now Playing">
+        <div style={{ display: "flex", gap: 12, padding: "4px 0 10px" }}>
+          <div
+            style={{
+              width: 68,
+              height: 102,
+              borderRadius: 8,
+              background: colors.raised,
+              flexShrink: 0,
+              overflow: "hidden",
+            }}
+          >
+            {cover && <img src={cover} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+          </div>
+          <div style={{ minWidth: 0, alignSelf: "center" }}>
+            <div style={{ color: colors.text, fontSize: 17, fontWeight: 700 }}>{playback.session.title}</div>
+            <div style={{ color: colors.muted, marginTop: 3 }}>{playback.session.author}</div>
+            <div style={{ color: colors.accent, marginTop: 12, fontWeight: 600 }}>
+              {loading ? "Opening audiobook…" : playback.chapter?.title || `Chapter ${playback.chapterIndex + 1}`}
+            </div>
           </div>
         </div>
-      </div>
-      <div style={{ height: 5, background: "#393c43", borderRadius: 99, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${progress}%`, background: colors.accent }} />
-      </div>
-      <div style={{ display: "flex", justifyContent: "space-between", color: colors.muted, fontVariantNumeric: "tabular-nums", margin: "5px 0 10px" }}>
-        <span>{formatTime(playback.position)}</span>
-        <span>{formatTime(playback.duration)}</span>
-      </div>
-      <Focusable
-        flow-children="horizontal"
-        style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}
-      >
-        <DialogButton
-          disabled={loading}
-          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
-          onClick={() => run(() => seekRelative(-15))}
+        <div style={{ height: 5, background: "#393c43", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${progress}%`, background: colors.accent }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", color: colors.muted, fontVariantNumeric: "tabular-nums", margin: "5px 0 10px" }}>
+          <span>{formatTime(playback.position)}</span>
+          <span>{formatTime(playback.duration)}</span>
+        </div>
+        <Focusable
+          flow-children="horizontal"
+          style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}
         >
-          ◀ 15s
-        </DialogButton>
-        <DialogButton
-          disabled={loading}
-          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
-          onClick={() => run(togglePlayPause)}
+          <DialogButton
+            disabled={loading}
+            onGamepadFocus={revealPlayerTop}
+            style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+            onClick={() => run(() => seekRelative(-15))}
+          >
+            ◀ 15s
+          </DialogButton>
+          <DialogButton
+            disabled={loading}
+            onGamepadFocus={revealPlayerTop}
+            style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+            onClick={() => run(togglePlayPause)}
+          >
+            {loading ? "Starting…" : playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
+          </DialogButton>
+          <DialogButton
+            disabled={loading}
+            onGamepadFocus={revealPlayerTop}
+            style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+            onClick={() => run(() => seekRelative(15))}
+          >
+            15s ▶
+          </DialogButton>
+        </Focusable>
+        <Focusable
+          flow-children="horizontal"
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8 }}
         >
-          {loading ? "Starting…" : playback.isPlaying ? <><FaPause /> Pause</> : <><FaPlay /> Play</>}
-        </DialogButton>
-        <DialogButton
-          disabled={loading}
-          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
-          onClick={() => run(() => seekRelative(15))}
-        >
-          15s ▶
-        </DialogButton>
-      </Focusable>
-      <Focusable
-        flow-children="horizontal"
-        style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, marginTop: 8 }}
-      >
-        <DialogButton
-          disabled={loading}
-          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
-          onClick={() => run(previousChapter)}
-        >
-          ◀ Chapter
-        </DialogButton>
-        <DialogButton
-          disabled={loading}
-          style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
-          onClick={() => run(nextChapter)}
-        >
-          Chapter ▶
-        </DialogButton>
-      </Focusable>
-      <PanelSectionRow>
-        <SliderField
-          disabled={loading}
-          label="Playback speed"
-          value={playback.speed}
-          min={0.5}
-          max={3}
-          step={0.05}
-          showValue
-          valueSuffix="×"
-          onChange={(value) => run(() => setSpeed(value))}
-        />
-      </PanelSectionRow>
-    </PanelSection>
+          <DialogButton
+            disabled={loading}
+            style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+            onClick={() => run(previousChapter)}
+          >
+            ◀ Chapter
+          </DialogButton>
+          <DialogButton
+            disabled={loading}
+            style={{ minWidth: 0, width: "100%", padding: "10px 2px", fontSize: 12 }}
+            onClick={() => run(nextChapter)}
+          >
+            Chapter ▶
+          </DialogButton>
+        </Focusable>
+        <PanelSectionRow>
+          <SliderField
+            disabled={loading}
+            label="Playback speed"
+            value={playback.speed}
+            min={0.5}
+            max={3}
+            step={0.05}
+            showValue
+            valueSuffix="×"
+            onChange={(value) => run(() => setSpeed(value))}
+          />
+        </PanelSectionRow>
+      </PanelSection>
+    </div>
   );
 }
 
